@@ -33,6 +33,9 @@ fate-suite:
 	# Grab ALL of the samples from the ffmpeg site.
 	rsync -vrltLW rsync://fate-suite.ffmpeg.org/fate-suite/ tests/assets/fate-suite/
 
+doctest:
+	$(PYTHON) -m doctest tutorials/*.md
+
 test:
 	$(PYTHON) setup.py test
 
