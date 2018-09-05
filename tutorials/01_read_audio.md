@@ -73,3 +73,4 @@ and as you can see from the ffprobe output, the first stream contains two tags (
 These are all the ways to select streams from your containers. As file input you can use any URL that ffmpeg would handle, for example you also read from a TCP stream with '''read(file="tcp:192.168.0.1:2222")'''. See the [ffmpeg protocol](https://www.ffmpeg.org/ffmpeg-protocols.html) for more details.
 
 [1]: https://www.geeksforgeeks.org/unpacking-a-tuple-in-python/ 
+
