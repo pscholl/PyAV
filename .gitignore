@@ -26,6 +26,7 @@
 /dist
 /docs/_build
 /docs/includes.rst
+/docs/examples
 /ipch
 /msvc-projects
 /src

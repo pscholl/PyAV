@@ -9,7 +9,7 @@ Saving Keyframes
 
 If you just want to look at keyframes, you can set :attr:`.CodecContext.skip_frame` to speed up the process:
 
-.. literalinclude:: ../../examples/basics/save_keyframes.py
+.. include:: ../examples/basics/save_keyframes.rst
 
 
 Remuxing
@@ -17,7 +17,7 @@ Remuxing
 
 Remuxing is copying audio/video data from one container to the other without transcoding it. By doing so, the data does not suffer any generational loss, and is the full quality that it was in the source container.
 
-.. literalinclude:: ../../examples/basics/remux.py
+.. include:: ../examples/basics/remux.rst
 
 
 Threading
@@ -29,6 +29,6 @@ This is faster than no threading, but is not as fast as we can go.
 
 Also enabling :data:`~av.codec.context.ThreadType.FRAME` (or :data:`~av.codec.context.ThreadType.AUTO`) threading allows multiple threads to decode independent frames. This is not enabled by default because it does change the API a bit: you will get a much larger "delay" between starting the decode of a packet and getting it's results. Take a look at the output of this sample to see what we mean:
 
-.. literalinclude:: ../../examples/basics/thread_type.py
+.. include:: ../examples/basics/thread_type.rst
 
 On the author's machine, the second pass decodes ~5 times faster.
