@@ -176,10 +176,10 @@ cdef class CodecContext(object):
 
         It will return all packets that are fully contained within the given
         input, and will buffer partial packets until they are complete.
-        
+
         :param ByteSource raw_input: A chunk of a byte-stream to process.
             Anything that can be turned into a :class:`.ByteSource` is fine.
-            ``None`` is used to flush the parser's buffers.
+            ``None`` or empty inputs will flush the parser's buffers.
 
         :return: ``list`` of :class:`.Packet` newly availible.
 
@@ -203,7 +203,7 @@ cdef class CodecContext(object):
 
         packets = []
 
-        while in_size:
+        while True:
 
             with nogil:
                 consumed = lib.av_parser_parse2(
@@ -235,8 +235,16 @@ cdef class CodecContext(object):
 
                 packets.append(packet)
 
+            if not in_size:
+                # This was a flush. Only one packet should ever be returned.
+                break
+
             in_data += consumed
             in_size -= consumed
+
+            if not in_size:
+                # Aaaand now we're done.
+                break
 
         return packets
 
