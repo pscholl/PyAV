@@ -36,13 +36,8 @@ cdef class AudioFrame(Frame):
 
     """A frame of audio."""
 
-<<<<<<< HEAD
-    def __cinit__(self, format='s16', layout='stereo', samples=0, align=1):
-        if format is _cinit_bypass_sentinel:
-=======
     def __cinit__(self, format='s16', layout='stereo', samples=0, align=True):
         if format is not None and format is _cinit_bypass_sentinel:
->>>>>>> make s16 available as numpy format
             return
 
         cdef AudioFormat cy_format = AudioFormat(format)

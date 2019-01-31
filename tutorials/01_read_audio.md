@@ -12,8 +12,33 @@
 
  This function allows to specify an input (this can be any string, a local file, a tcp stream, or anything ffmpeg can read as an input) to read from. The streams you want to read. By default, all streams are read. The input rate in which you want to read the streams, and the total amount of time you like to cover for each returned block of data. The input will then return an iterator to loop over blocks of the read input. These blocks are returned as numpy array containing the data for each stream. We'll choose a file for simplicity now:
 
-    >>> for stream, in input('a:0', fate_suite('audio-reference/chorusnoise_2ch_44kHz_s16.wav'), 50, 1):
+    >>> audiofile = fate_suite('fate_suite('audio-reference/chorusnoise_2ch_44kHz_s16.wav'))
+    >>> for stream, in input('a:0', audiofile, 50, 1):
     ...   print(stream.shape)
     (2, 50)
     (2, 50)
     (2, 6)
+
+
+ You can also call the function to just open all streams and their stored rate and with a window of one second:
+
+
+    >>> audiofile = fate_suite('fate_suite('audio-reference/chorusnoise_2ch_44kHz_s16.wav'))
+    >>> for stream, in input(audiofile)
+    ...   print(stream.shape)
+    (2, 50)
+    (2, 50)
+    (2, 6)
+
+ The numpy array objects that are returned by this function, contain additional information about the streams that are decoded. To access them there a special fields that are added at runtime (audiorate, …):
+
+    >>> audiofile = fate_suite('fate_suite('audio-reference/chorusnoise_2ch_44kHz_s16.wav'))
+    >>> for stream, in input(audiofile)
+    ...   print(stream.audiorate)
+    44100
+    44100
+    44100
+
+ As the simplest call it is enough to just open the file and will open all streams contained in the file and their default rate. If the rates will differ they will automatically be resampled to the greatest common divider so that they can be in a synchronous fashion:
+
+
