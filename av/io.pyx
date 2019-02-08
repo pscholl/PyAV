@@ -11,7 +11,7 @@ def _mapstreams(string, streams):
     return [ _mapstream(tokenlist, streams)\
              for tokenlist in string.split(' ')]
 
-def _mapstream(tokenlist, streams):
+def _mapselector(tokenlist, streams):
     x = [ set(_mapspecifier(token, streams))\
           for token in tokenlist.split(',')]
     x = list(set.intersection(*x))
@@ -39,6 +39,7 @@ def _mapspecifier(token, streams):
 
     selector = {
         r'([avsd]):(\d+)' : bynumber,
+        r'([avsf]):'      : bytype,
         r'(\w+):(\w+)'    : bynamedtag,
         r'(\w+)'          : byname, }
 
@@ -94,7 +95,13 @@ class demuxedarr:
             if frame is None:
                 continue
 
-            self.buffer[packet.stream] = frame.to_nd_array()
+            arr = frame.to_ndarray()
+
+            if frame.format.is_packed:
+                channels = len(frame.layout.channels)
+                arr = arr.reshape((channels,-1))
+
+            self.buffer[packet.stream] = arr
             audio = self.__doemit(av.audio.stream.AudioStream)
 
             if audio: return audio
@@ -136,7 +143,8 @@ class AvIO(object):
                  streams=None,
                  file=None,
                  rate=None,
-                 secs=None):
+                 secs=None,
+                 meta=None):
 
         if rate is not None:
             rate = int(rate)
@@ -148,9 +156,13 @@ class AvIO(object):
         container = av.open(file or sys.argv[1])
         selected = _mapstreams(streams, container.streams)
         demuxed = demuxedarr(container, selected, audioresampler)
-        windowed = windowarr(demuxed, rate, secs)
+        #windowed = windowarr(demuxed, rate, secs)
 
-        return windowed
+        if meta is not None:
+            for s in selected:
+                meta.append(s.metadata)
+
+        return demuxed
 
 input = AvIO()
 
