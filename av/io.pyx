@@ -7,14 +7,23 @@
 
 import av, sys, re, numpy as np
 
-def _mapstreams(string, streams):
-    return [ _mapstream(tokenlist, streams)\
-             for tokenlist in string.split(' ')]
+def _mapstreams(stringorcallable, streams):
+    try:
+        return stringorcallable(streams)
+    except TypeError:
+        return [ elem\
+                 for tokenlist in stringorcallable.split(' ')\
+                 for elem in _mapselector(tokenlist, streams) ]
 
 def _mapselector(tokenlist, streams):
     x = [ set(_mapspecifier(token, streams))\
           for token in tokenlist.split(',')]
     x = list(set.intersection(*x))
+
+    if len(x) == 0:
+        raise Exception("no stream found matching %s" % tokenlist)
+    else:
+        return x
 
     if len(x) == 1:
         return x[0]
@@ -58,22 +67,17 @@ class demuxedarr:
     """
     def __init__(self, container, selected, audioresampler):
         self.container = container.demux(selected)
-        self.buffer = {s:None for s in selected}
+        self.buffer = { k: [] for k in selected }
         self.ar = audioresampler
 
     def __iter__(self):
         return self
 
-    def __doemit(self, type):
-        values = [v for (k,v) in self.buffer.items() if isinstance(k, type)]
-        keys = [k for (k,v) in self.buffer.items() if isinstance(k, type)]
+    def __doemit(self):
+        if any(len(v) == 0 for v in self.buffer.values()):
+            return None
 
-        if all([v is not None for v in values]):
-            for s in keys:
-                self.buffer[s] = None
-            return values
-
-        return None
+        return [ v.pop(0) for v in self.buffer.values() ]
 
     def __next__(self):
         for packet in self.container:
@@ -85,8 +89,10 @@ class demuxedarr:
             if len(frames) > 1:
                 raise Exception("more than one frame per packet is not supported")
 
-            if self.buffer[packet.stream] is not None:
-                raise Exception("stream decoded twice without emitting, do selected streams have the same sampling rate?")
+            if any(len(v) > 100 for v in self.buffer.values()):
+                sys.stderr.write("queueing more than 100 frames per stream, "+\
+                                 "something maybe wrong with your file. "+\
+                                 "Maybe try re-encoding it.\n")
 
             frames[0].pts = None
             frame = self.ar.resample(frames[0])
@@ -101,8 +107,8 @@ class demuxedarr:
                 channels = len(frame.layout.channels)
                 arr = arr.reshape((channels,-1))
 
-            self.buffer[packet.stream] = arr
-            audio = self.__doemit(av.audio.stream.AudioStream)
+            self.buffer[packet.stream].append(arr)
+            audio = self.__doemit()
 
             if audio: return audio
 
@@ -140,11 +146,11 @@ class AvIO(object):
         pass
 
     def __call__(self,
-                 streams=None,
+                 streams=lambda x: [s for s in x],
                  file=None,
                  rate=None,
                  secs=None,
-                 meta=None):
+                 info=None):
 
         if rate is not None:
             rate = int(rate)
@@ -158,13 +164,31 @@ class AvIO(object):
         demuxed = demuxedarr(container, selected, audioresampler)
         #windowed = windowarr(demuxed, rate, secs)
 
-        if meta is not None:
+        if info is not None:
             for s in selected:
-                meta.append(s.metadata)
+                info.append(s)
 
         return demuxed
 
+class AvIOComplete(AvIO):
+    """ returns the whole input file/stream
+    """
+
+    def __call__(self,
+                 streams=lambda x: [s for s in x],
+                 file=None,
+                 rate=None):
+
+        info = []
+        buf = AvIO.__call__(self, streams,file,rate,info=info)
+        buf = map(list, zip(*buf))
+        buf = map(np.hstack, buf)
+        buf = list(buf)
+
+        return buf, info
+
 input = AvIO()
+read = AvIOComplete()
 
 if __name__ == '__main__':
     for a,b in input("a:27 a:26"):
