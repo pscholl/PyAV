@@ -25,13 +25,6 @@ def _mapselector(tokenlist, streams):
     else:
         return x
 
-    if len(x) == 1:
-        return x[0]
-    elif len(x) > 1:
-        raise Exception("too many streams found matching %s: %s" % (tokenlist, x))
-    else:
-        raise Exception("no stream found matching %s" % tokenlist)
-
 def _mapspecifier(token, streams):
     byname = lambda m,s: [x for x in s if\
             m in x.metadata.get('NAME', '')]
