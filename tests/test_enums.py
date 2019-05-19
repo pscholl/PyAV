@@ -4,6 +4,7 @@ from av.enums import EnumType, define_enum
 
 from .common import TestCase
 
+
 # This must be at the top-level.
 PickleableFooBar = define_enum('PickleableFooBar', [('FOO', 1)])
 
@@ -27,6 +28,8 @@ class TestEnums(TestCase):
         self.assertIsInstance(foo, cls)
         self.assertEqual(foo.name, 'FOO')
         self.assertEqual(foo.value, 1)
+
+        self.assertNotIsInstance(foo, PickleableFooBar)
 
     def test_access(self):
 

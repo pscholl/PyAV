@@ -5,7 +5,7 @@ PYAV_PYTHON ?= python
 PYTHON := $(PYAV_PYTHON)
 
 
-.PHONY: default build cythonize clean clean-all info test fate-suite test-assets docs
+.PHONY: default build cythonize clean clean-all info lint test fate-suite test-assets docs
 
 default: build
 
@@ -35,6 +35,10 @@ fate-suite:
 
 doctest:
 	$(PYTHON) -m doctest tutorials/*.md
+
+lint:
+	TESTSUITE=flake8 scripts/test
+	TESTSUITE=isort scripts/test
 
 test:
 	$(PYTHON) setup.py test

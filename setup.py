@@ -500,7 +500,7 @@ setup(
 
     url="https://github.com/mikeboers/PyAV",
 
-    packages=find_packages(exclude=['build*', 'tests*', 'examples*']),
+    packages=find_packages(exclude=['build*', 'examples*', 'scratchpad*', 'tests*']),
 
     zip_safe=False,
     ext_modules=ext_modules,
@@ -512,7 +512,7 @@ setup(
         'cythonize': CythonizeCommand,
     },
 
-    test_suite='nose.collector',
+    test_suite='tests',
 
     entry_points={
         'console_scripts': [

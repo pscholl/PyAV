@@ -81,15 +81,12 @@ cdef class AudioFrame(Frame):
                 align
             ))
 
-            self._init_planes(AudioPlane)
-
     def __dealloc__(self):
         lib.av_freep(&self._buffer)
 
     cdef _init_user_attributes(self):
         self.layout = get_audio_layout(0, self.ptr.channel_layout)
         self.format = get_audio_format(<lib.AVSampleFormat>self.ptr.format)
-        self._init_planes(AudioPlane)
 
     def __repr__(self):
         return '<av.%s %d, pts=%s, %d samples at %dHz, %s, %s at 0x%x>' % (
@@ -131,6 +128,19 @@ cdef class AudioFrame(Frame):
             plane.update(array[i, :])
         return frame
 
+    @property
+    def planes(self):
+        """
+        A tuple of :class:`~av.audio.plane.AudioPlane`.
+
+        :type: tuple
+        """
+        cdef int plane_count = 0
+        while self.ptr.extended_data[plane_count]:
+            plane_count += 1
+
+        return tuple([AudioPlane(self, i) for i in range(plane_count)])
+
     property samples:
         """
         Number of audio samples (per channel).
@@ -148,6 +158,7 @@ cdef class AudioFrame(Frame):
         """
         def __get__(self):
             return self.ptr.sample_rate
+
         def __set__(self, value):
             self.ptr.sample_rate = value
 
@@ -155,6 +166,7 @@ cdef class AudioFrame(Frame):
         """Another name for :attr:`sample_rate`."""
         def __get__(self):
             return self.ptr.sample_rate
+
         def __set__(self, value):
             self.ptr.sample_rate = value
 
@@ -164,7 +176,6 @@ cdef class AudioFrame(Frame):
         .. note:: Numpy must be installed.
 
         """
-
         import numpy as np
 
         # map avcodec type to numpy type

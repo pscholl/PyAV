@@ -1,7 +1,7 @@
 from libc.stdint cimport uint8_t
 
 from av.deprecation import renamed_attr
-from av.enums cimport EnumType, define_enum
+from av.enums cimport define_enum
 from av.utils cimport err_check
 from av.video.format cimport get_video_format, VideoFormat
 from av.video.plane cimport VideoPlane
@@ -19,7 +19,7 @@ cdef VideoFrame alloc_video_frame():
     return VideoFrame.__new__(VideoFrame, _cinit_bypass_sentinel)
 
 
-cdef EnumType PictureType = define_enum('PictureType', (
+PictureType = define_enum('PictureType', (
     ('NONE', lib.AV_PICTURE_TYPE_NONE),
     ('I', lib.AV_PICTURE_TYPE_I),
     ('P', lib.AV_PICTURE_TYPE_P),
@@ -90,11 +90,8 @@ cdef class VideoFrame(Frame):
 
             # Allocate the buffer for the video frame.
             #
-            # We enforce 8-byte aligned buffers, otherwise `sws_scale` causes
-            # out-of-bounds reads and writes for images whose width is not a
-            # multiple of 8.
-            #
-            # TODO: ensure 8 bytes is sufficient, even for resizing operations.
+            # We enforce aligned buffers, otherwise `sws_scale` can perform
+            # poorly or even cause out-of-bounds reads and writes.
             if width and height:
                 ret = lib.av_image_alloc(
                     self.ptr.data,
@@ -102,18 +99,15 @@ cdef class VideoFrame(Frame):
                     width,
                     height,
                     format,
-                    8)
-                with gil: err_check(ret)
+                    16)
+                with gil:
+                    err_check(ret)
                 self._buffer = self.ptr.data[0]
 
         self._init_user_attributes()
 
-    cdef int _max_plane_count(self):
-        return self.format.ptr.nb_components
-
     cdef _init_user_attributes(self):
         self.format = get_video_format(<lib.AVPixelFormat>self.ptr.format, self.ptr.width, self.ptr.height)
-        self._init_planes(VideoPlane)
 
     def __dealloc__(self):
         # The `self._buffer` member is only set if *we* allocated the buffer in `_init`,
@@ -268,13 +262,31 @@ cdef class VideoFrame(Frame):
                 # Cast for const-ness, because Cython isn't expressive enough.
                 <const uint8_t**>self.ptr.data,
                 self.ptr.linesize,
-                0, # slice Y
+                0,  # slice Y
                 self.ptr.height,
                 frame.ptr.data,
                 frame.ptr.linesize,
             )
 
         return frame
+
+    @property
+    def planes(self):
+        """
+        A tuple of :class:`~av.video.plane.VideoPlane` objects.
+
+        :type: tuple
+        """
+        # We need to detect which planes actually exist, but also contrain
+        # ourselves to the maximum plane count (as determined only by VideoFrames
+        # so far), in case the library implementation does not set the last
+        # plane to NULL.
+        cdef int max_plane_count = self.format.ptr.nb_components
+        cdef int plane_count = 0
+        while plane_count < max_plane_count and self.ptr.extended_data[plane_count]:
+            plane_count += 1
+
+        return tuple([VideoPlane(self, i) for i in range(plane_count)])
 
     property width:
         """Width of the image, in pixels."""
