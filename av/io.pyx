@@ -62,6 +62,7 @@ class demuxedarr:
         self.container = container.demux(selected)
         self.buffer = { k: [] for k in selected }
         self.ar = audioresampler
+        self.warned = False
 
     def __iter__(self):
         return self
@@ -82,10 +83,11 @@ class demuxedarr:
             if len(frames) > 1:
                 raise Exception("more than one frame per packet is not supported")
 
-            if any(len(v) > 100 for v in self.buffer.values()):
+            if any(len(v) > 100 for v in self.buffer.values()) and not self.warned:
                 sys.stderr.write("queueing more than 100 frames per stream, "+\
                                  "something maybe wrong with your file. "+\
                                  "Maybe try re-encoding it.\n")
+                self.warned = True
 
             frames[0].pts = None
             frame = self.ar.resample(frames[0])
@@ -171,6 +173,19 @@ class AvIOComplete(AvIO):
                  streams=lambda x: [s for s in x],
                  file=None,
                  rate=None):
+        """
+        read a multi-media file into memory completly.
+
+        Args:
+            streams: optional string or callable to specify streams, default is to read all
+            file: string or open file object to be read
+            rate: resample all streams to rate, defaults to read streams at rate given from file
+
+        Returns:
+            a tuple containing (streams, info) lists, the streams list contains
+            all list as numpy arrays, while info holds a metadata information
+            object for each stream.
+        """
 
         info = []
         buf = AvIO.__call__(self, streams,file,rate,info=info)
