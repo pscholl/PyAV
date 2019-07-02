@@ -60,52 +60,109 @@ class demuxedarr:
     """
     def __init__(self, container, selected, audioresampler):
         self.container = container.demux(selected)
-        self.buffer = { k: [] for k in selected }
-        self.ar = audioresampler
+        self.selected = selected
         self.warned = False
+        self.ar = audioresampler
 
     def __iter__(self):
-        return self
-
-    def __doemit(self):
-        if any(len(v) == 0 for v in self.buffer.values()):
-            return None
-
-        return [ v.pop(0) for v in self.buffer.values() ]
-
-    def __next__(self):
-        for packet in self.container:
+        def decode(packet):
             frames = packet.decode()
 
             if len(frames) == 0:
-                raise StopIteration()
+                return None
 
-            if len(frames) > 1:
-                raise Exception("more than one frame per packet is not supported")
+            if packet.stream.codec.type == 'audio':
+                for f in frames:
+                    f.pts = None # XXX not good
 
-            if any(len(v) > 100 for v in self.buffer.values()) and not self.warned:
-                sys.stderr.write("queueing more than 100 frames per stream, "+\
-                                 "something maybe wrong with your file. "+\
-                                 "Maybe try re-encoding it.\n")
-                self.warned = True
+                if len(frames) > 1:
+                    raise Exception("more than one frame not supported")
 
-            frames[0].pts = None
-            frame = self.ar.resample(frames[0])
-            #frame = frames[0]
+                frames = [ self.ar.resample(frames[0]) ]
 
-            if frame is None:
-                continue
+            sys.stderr.write("wtf %s\n" % frames)
+            return frames
 
-            arr = frame.to_ndarray()
+        def perpts(it):
+            """ collect all packets with matching pts fields, and store them
+            in a dict() dissecting each stream.
+            """
+            pts, buf = .0, { k: [] for k in self.selected }
 
-            if frame.format.is_packed:
-                channels = len(frame.layout.channels)
-                arr = arr.reshape((channels,-1))
+            for packet in it:
+                frames = decode(packet)
 
-            self.buffer[packet.stream].append(arr)
-            audio = self.__doemit()
+                if frames is None:
+                    continue # no data, maybe due to downsampling
 
-            if audio: return audio
+                if packet.pts is None:
+                    break # end-of-stream
+
+                elif packet.pts == pts:
+                    buf[packet.stream].extend(frames)
+
+                else:
+                    yield pts, buf
+                    pts, buf = packet.pts, { k: [] for k in self.selected }
+                    buf[packet.stream].extend(frames)
+
+            if any( len(v) for v in buf.values() ):
+                yield pts, buf
+
+        self.packets = perpts(self.container)
+
+        return self
+
+    def __next__(self):
+        #
+        # read as many packets as required to forward the presentation
+        # timestamp (pts) beyond what is buffered
+        #
+        pts, packets = next(self.packets)
+
+        def audio(frames):
+            """ concatenate multiple frames of audio date. When in packed format
+            unpack to channel first alignment.
+            """
+            frames = [ self.ar.resample(f) for f in frames ]
+            frames = [ f for f in frames if f is not None  ]
+
+            if len(frames) == 0:
+                return None
+
+            f2a = lambda f: f.to_ndarray()
+            p2u = lambda a,f: a.reshape((len(f.layout.channels), -1))
+
+            return np.concatenate([\
+                f2a(frame) if not frame.format.is_packed else\
+                p2u(f2a(frame), frame) for frame in frames])
+
+        def subtitle(frames, multiply):
+            """ duplicate subtitles to match the global sampling rate given.
+            """
+            s2s = lambda f: f.ass.split(',')[-1]
+            return np.array([s2s(f[0]) for f in frames]*multiply)
+
+        packets.update( (s, audio(p))\
+                for (s,p) in packets.items()\
+                if s.codec.type == 'audio' )
+
+        sys.stderr.write(" wtf: %s\n" % str(packets))
+        #
+        # multiply all subtitle to have the same sampling frequency as the first
+        # non-subtitle stream
+        #
+        multiply = [ v for (k,v) in packets.items()\
+                     if k.codec.type != 'subtitle' ]
+        multiply = multiply[0].shape[-1]\
+                   if len(multiply) and multiply[0] is not None\
+                   else 1
+
+        packets.update( (s, subtitle(p, multiply))\
+            for (s,p) in packets.items() if s.codec.type == 'subtitle')
+
+        #sys.stderr.write("wtf %s\n" % packets)
+        return packets.values()
 
 class windowarr:
     """ Iterates over frames, and stacks them together to a larger time-window
