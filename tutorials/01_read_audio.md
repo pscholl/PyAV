@@ -11,20 +11,20 @@
 
  Now to load a file, the easiest way is to specify just the file to load and all stream will be loaded and returned with a metadata object. Since a multi-media file can contain multiple streams, a tuple of two lists is returned:
 
-#    >>> streams, info = read(file=audiofile)
-#    >>> len(info), info[0].rate, info[0].channels, info[0].format
-#    (1, 44100, 2, <av.AudioFormat s16>)
-#
+    >>> streams, info = read(file=audiofile)
+    >>> len(info), info[0].rate, info[0].channels, info[0].format
+    (1, 44100, 2, <av.AudioFormat s16>)
+
  The stream list contains the data in the audio-streams as a numpy array, i.e.:
-#
-#    >>> print( streams[0].shape )
-#    (2, 93209)
-#
+
+    >>> print( streams[0].shape )
+    (2, 93209)
+
  The audio stream is actually 2.11 seconds long, hence the second dimension of the array is the sample number, while the first dimension is the channel of the audio-file. If you know what kind of file you are reading you can use python's tuple extraction syntax to make data reading a little bit more obvious:
-#
-#    >>> (audio, *_), info = read(file=audiofile)
-#    >>> print(audio.shape)
-#    (2, 93209)
+
+    >>> (audio, *_), info = read(file=audiofile)
+    >>> print(audio.shape)
+    (2, 93209)
 
  which extracts the first list element in the returned tuple, while ignoring all subsequent elements if there are any. This can happen when your file contains multiple streams for example. Let's imagine that you like to extract audio data at a pre-determined rate, or have all streams sampled at the same rate. This requires a re-sampling of the audio/data stream to this rate, and pyav can do that for you. Just add a parameter to the read() method:
 
@@ -34,26 +34,26 @@
 
  Now, you have the data re-sampled to 50Hz (the lowest rate is 1Hz), so only 90 samples are returned. Luckily we already know that our input file only contains audio-data, and no subtitle neither video streams. Otherwise we might read streams that we do not need later on, increasing the overhead for reading data. We can however specify which streams should be read, and we have multiple options for that. The first one is to supply a callable, that will receive the list of streams that are in the file and must return a list of streams to be read. For example only reading audio streams:
 
-#    >>> audioonly = lambda streams: [s for s in streams if s.type == 'audio']
-#    >>> (audio, *_), info = read(file=audiofile, streams=audioonly)
-#    >>> print(audio.shape)
-#    (2, 93209)
+    >>> audioonly = lambda streams: [s for s in streams if s.type == 'audio']
+    >>> (audio, *_), info = read(file=audiofile, streams=audioonly)
+    >>> print(audio.shape)
+    (2, 93209)
 
  Instead of doing this with a callable, a number of shortcuts can also be used. For example, to access via type and stream number, we can use 'a:n', 'v:n', 's:n', and 'd:n'. This will select either the n-th audio, video, subtitle or data stream. You can leave 'n' to select all streams of a certain type. For example all audio streams:
 
-#    >>> videofile = fate_suite('mkv/test7_cut.mkv')
-#    >>> (audio, *_), info = read(file=videofile, streams='a:')
-#    >>> print(audio.shape)
-#    (2, 146432)
+    >>> videofile = fate_suite('mkv/test7_cut.mkv')
+    >>> (audio, *_), info = read(file=videofile, streams='a:')
+    >>> print(audio.shape)
+    (2, 146432)
 
 Or with a number, and you can mix multiple selectors by separating them with a space:
 
-#    >>> (audio, *_), info = read(file=videofile, streams='a:0 a:')
+    >>> (audio, *_), info = read(file=videofile, streams='a:0 a:')
 
 You can also select them by the tags specified for each stream, or if they carry a NAME tag, just a string is enough to match'em:
 
-#    >>> videofile = fate_suite('mkv/codec_delay_opus.mkv')
-#    >>> (audio, *_), info = read(file=videofile, streams='ENCODER:libopus')
+    >>> videofile = fate_suite('mkv/codec_delay_opus.mkv')
+    >>> (audio, *_), info = read(file=videofile, streams='ENCODER:libopus')
 
 The above example matroska file contains one stream:
 

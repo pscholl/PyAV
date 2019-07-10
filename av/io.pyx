@@ -65,52 +65,49 @@ class demuxedarr:
         self.ar = audioresampler
 
     def __iter__(self):
-        def decode(packet):
-            frames = packet.decode()
-
-            if len(frames) == 0:
-                return None
-
-            if packet.stream.codec.type == 'audio':
-                for f in frames:
-                    f.pts = None # XXX not good
-
-                if len(frames) > 1:
-                    raise Exception("more than one frame not supported")
-
-                frames = [ self.ar.resample(frames[0]) ]
-
-            sys.stderr.write("wtf %s\n" % frames)
-            return frames
-
         def perpts(it):
             """ collect all packets with matching pts fields, and store them
-            in a dict() dissecting each stream.
+            in a dict() indexed by each stream.
             """
             pts, buf = .0, { k: [] for k in self.selected }
 
             for packet in it:
-                frames = decode(packet)
+                frames = packet.decode()
 
-                if frames is None:
-                    continue # no data, maybe due to downsampling
+                #
+                # resample audio streams
+                #
+                if packet.stream.codec.type == 'audio':
+                    frames = [ self.ar.resample(f) for f in frames ]
 
+                #
+                # check if ready to emit a buffer
+                #
                 if packet.pts is None:
-                    break # end-of-stream
+                    break    # end-of-stream
 
-                elif packet.pts == pts:
+                elif packet.pts != pts and\
+                     all( len(v) for (s,v) in buf.items()\
+                          if s.codec.type != 'subtitle'):
+
+                        yield pts, buf
+                        pts, buf = packet.pts, { k: [] for k in self.selected }
+
+                #
+                # add frames to buffer if any available
+                #
+                if frames is not None and\
+                   len(frames) > 0 and\
+                   frames[0] is not None:
                     buf[packet.stream].extend(frames)
 
-                else:
-                    yield pts, buf
-                    pts, buf = packet.pts, { k: [] for k in self.selected }
-                    buf[packet.stream].extend(frames)
-
+            #
+            # flush what is left in the buffers
+            #
             if any( len(v) for v in buf.values() ):
                 yield pts, buf
 
         self.packets = perpts(self.container)
-
         return self
 
     def __next__(self):
@@ -119,12 +116,12 @@ class demuxedarr:
         # timestamp (pts) beyond what is buffered
         #
         pts, packets = next(self.packets)
+        # sys.stderr.write("ftw %s\n" % packets)
 
         def audio(frames):
             """ concatenate multiple frames of audio date. When in packed format
             unpack to channel first alignment.
             """
-            frames = [ self.ar.resample(f) for f in frames ]
             frames = [ f for f in frames if f is not None  ]
 
             if len(frames) == 0:
@@ -143,17 +140,15 @@ class demuxedarr:
             s2s = lambda f: f.ass.split(',')[-1]
             return np.array([s2s(f[0]) for f in frames]*multiply)
 
-        packets.update( (s, audio(p))\
-                for (s,p) in packets.items()\
-                if s.codec.type == 'audio' )
+        packets.update( (s, audio(p)) \
+            for (s,p) in packets.items() if s.codec.type == 'audio')
 
-        sys.stderr.write(" wtf: %s\n" % str(packets))
-        #
         # multiply all subtitle to have the same sampling frequency as the first
         # non-subtitle stream
-        #
+
         multiply = [ v for (k,v) in packets.items()\
                      if k.codec.type != 'subtitle' ]
+
         multiply = multiply[0].shape[-1]\
                    if len(multiply) and multiply[0] is not None\
                    else 1
@@ -161,7 +156,7 @@ class demuxedarr:
         packets.update( (s, subtitle(p, multiply))\
             for (s,p) in packets.items() if s.codec.type == 'subtitle')
 
-        #sys.stderr.write("wtf %s\n" % packets)
+        # sys.stderr.write("wtf %s\n" % packets)
         return packets.values()
 
 class windowarr:

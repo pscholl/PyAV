@@ -111,7 +111,8 @@ cdef class AudioResampler(object):
                 frame.ptr.channel_layout != self.template.layout.layout or
                 frame.ptr.sample_rate != self.template.ptr.sample_rate
             ):
-                raise ValueError('Frame does not match AudioResampler setup.')
+                import sys
+                raise ValueError('Frame does not match AudioResampler setup. %s')
 
         # Assert that the PTS are what we expect.
         cdef int64_t expected_pts
