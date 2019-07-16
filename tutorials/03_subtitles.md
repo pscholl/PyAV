@@ -11,13 +11,20 @@
    >>> s
    [array([[1., 2.],
           [2., 4.],
-          [3., 3.]]), array(['NULL\r\n', 'abc\r\n'], dtype='<U6')]
+          [3., 3.]]), array(['NULL', 'abc'], dtype='<U4')]
 
+
+    >>> subfile = '01_1_E.mkv'
+    >>> (s,a), info = read('s:0 a:0', file = subfile)
+    >>> a.shape
+    (5, 26075)
+    >>> s.shape
+    (26075,)
 
     >>> subfile = 'test.mkv'
     >>> (s,a), info = read('s: a:', file = subfile)
     >>> a.shape
     (3, 90000)
     >>> s.shape
-    (90001,)
+    (90000,)
 

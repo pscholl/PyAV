@@ -63,6 +63,7 @@ class demuxedarr:
         self.selected = selected
         self.warned = False
         self.ar = audioresampler
+        self.framecount = dict( (s,0) for s in self.selected )
 
     def __packets2frames(self, ps):
         def aud(ps):
@@ -162,9 +163,11 @@ class demuxedarr:
         def sub(frames):
             """ duplicate subtitles to match the global sampling rate given.
             """
-            s2s = lambda f: f.ass.split(',')[-1]
-            sub = (s2s(f[0]) for f in frames)
-            return np.array( list(sub) ) if frames and len(frames) else None
+            if frames:
+                s2s = lambda f: f.ass.split(',')[-1].strip() if f else 'None'
+                return [", ".join(s2s(f[0]) for f in frames)]
+            else:
+                return ['None']
 
         frames.update( (s, aud(p) if s.codec.type == 'audio' else\
                            vid(p) if s.codec.type == 'video' else\
@@ -172,7 +175,24 @@ class demuxedarr:
                            None) \
                         for (s,p) in frames.items() )
 
-        # sys.stderr.write("wtf %s\n" % frames)
+        #
+        # multiply subtitle stream to even it out with the first audio stream
+        #
+        factor = [ p.shape[-1] for (s,p) in frames.items() if s.codec.type=='audio']
+        factor = factor[0] if len(factor) else 1
+
+        frames.update( (s, p if s.codec.type != 'subtitle' else\
+                           np.array(p * factor)) for (s,p) in frames.items() )
+
+        for s in self.selected:
+            if s.codec.type == 'audio':
+                self.framecount[s] += frames[s].shape[-1]
+            else:
+                self.framecount[s] += frames[s].shape[0]
+
+        # sys.stderr.write("wtf %s\n" % dict ( (s, f.shape) for (s,f) in frames.items()))
+        # sys.stderr.write("wtf %s\n" % self.framecount)
+        # sys.stderr.write("ftf %s\n" % frames)
         return frames.values()
 
 class windowarr:
