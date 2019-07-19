@@ -1,291 +1,231 @@
-"""
+import sys
+from av import open
+from sys import argv
+from itertools import groupby
+from collections import OrderedDict
+from numpy import concatenate as concat, stack, empty, ndarray, asarray
+from math import inf, floor, ceil, isinf
+from re import split, match
 
-  wrapper for the avio library to make reading and writing ffmpeg files
-  pythonic and simple to use.
+class avarray(ndarray):
+    """ array with metadata from the libav container, i.e. sample-rate etc.,
+    which is stored in the 'info' field
+    """
+    def __new__(cls, array, dtype=None, order=None, info=None):
+        obj = asarray(array, dtype=dtype, order=order).view(cls)
+        obj.info = info
+        return obj
 
-"""
+    def __array_finalize__(self, obj):
+        if obj is None: return
+        self.info = getattr(obj, 'info', None)
 
-import av, sys, re, numpy as np
+def mapstreams(strorfun, streams):
+    """ select stream with a string specifier or a callable that filters
+    streams to include the wanted ones.
 
-def _mapstreams(stringorcallable, streams):
+    Args:
+        strorfun: see the read() function for specifications
+        streams:  a list of stream specifications from libav
+
+    Returns:
+        a filtered list of streams
+    """
+    #
+    # select, probably overlapping streams, by the specifications given
+    # in the single token
+    #
+    def _mapspecifier(token, streams):
+        byname = lambda m,s: [x for x in s if\
+                m in x.metadata.get('NAME', '').lower()]
+        bytype = lambda t,s:\
+                s.audio     if t=='a' else\
+                s.video     if t=='v' else\
+                s.subtitles if t=='s' else\
+                s.data      if t=='d' else []
+        bynumber = lambda t,n,s:\
+                bytype(t,s) if n=='' else\
+                [bytype(t,s)[int(n)]]
+        bynamedtag = lambda k,v,s: [x for x in s if\
+                v in x.metadata.get(k, str(getattr(x, k, '')))]
+
+        selector = {
+            r'([avsd]):(\d+)' : bynumber,
+            r'([avsf]):'      : bytype,
+            r'(\w+):(\w+)'    : bynamedtag,
+            r'(\w+)'          : byname, }
+
+        for pattern, fun in selector.items():
+            m = match(pattern, token)
+            if m:
+                streams = fun(*m.groups(), streams)
+                return streams
+
+        return []
+
     try:
-        return stringorcallable(streams)
+        return strorfun(streams)
+
     except TypeError:
-        return [ elem\
-                 for tokenlist in stringorcallable.split(' ')\
-                 for elem in _mapselector(tokenlist, streams) ]
+        return list(OrderedDict.fromkeys([ elem\
+                 for token in split(r'(?<!\\) ', strorfun)\
+                 for elem  in _mapspecifier(token, streams) ]))
 
-def _mapselector(tokenlist, streams):
-    x = [ set(_mapspecifier(token, streams))\
-          for token in tokenlist.split(',')]
-    x = list(set.intersection(*x))
 
-    if len(x) == 0:
-        raise Exception("no stream found matching %s" % tokenlist)
-    else:
-        return x
+def input(streams=lambda x: list(x), window=1000, file=None):
+    """ reads a multimedia file with ffmpeg/libav and returns blocks of
+    for each stream in a demultiplexed way.
 
-def _mapspecifier(token, streams):
-    byname = lambda m,s: [x for x in s if\
-            m in x.metadata.get('NAME', '')]
-    bytype = lambda t,s:\
-            s.audio     if t=='a' else\
-            s.video     if t=='v' else\
-            s.subtitles if t=='s' else\
-            s.data      if t=='d' else []
-    bynumber = lambda t,n,s:\
-            bytype(t,s) if n=='' else\
-            [bytype(t,s)[int(n)]]
-    bynamedtag = lambda k,v,s: [x for x in s if\
-            v in x.metadata.get(k, str(getattr(x, k, '')))]
+    Args:
+        streams: optional stream or callable to select streams to be read,
+                 default is to read all stream. Streams can be specified in
+                 four ways with a selection string:
+                 * by type and number (e.g. 'a:0' for the first audio
+                   stream)
+                 * just by type (e.g. 'v:' for all video streams)
+                 * by a named tag (e.g. 'ENCODER:abc' to match all stream with
+                   an ENCODER tag which contains abc)
+                 * by the NAME tag (e.g. 'abc' matches all streams with a NAME
+                   tag which contains abc)
+                 multple string selectors can be combined by separating them
+                 with a space, e.g. 'a:0 s:' select the first audio-stream, and
+                 all contained subtitle streams.
+        window: defaults to 1000ms, and will read until the EOF is reached.
+                If any number is given, the method will yield a block of data
+                whenever 'window' milli-seconds of data were read.
+        file: optional string which specifies the input to be read, can be
+              anything that libav/ffmpeg can read including, for example,
+              tcp/udp/rtmp network streams, any file, or even pipes. For a
+              complete list, see the
+              [ffmpeg protocols](https://ffmpeg.org/ffmpeg-protocols.html)
+              documentation.
 
-    selector = {
-        r'([avsd]):(\d+)' : bynumber,
-        r'([avsf]):'      : bytype,
-        r'(\w+):(\w+)'    : bynamedtag,
-        r'(\w+)'          : byname, }
-
-    for pattern, fun in selector.items():
-        match = re.match(pattern, token)
-        if match:
-            streams = fun(*match.groups(), streams)
-            return streams
-
-    return []
-
-class demuxedarr:
-    """ iterate multiple streams in synchronized fashion, return
-    when a complete video, audio, subtitle or data plane has been
-    read, returning copies of all other streams.
+    Returns:
+        a tuple containing (streams, streaminfo) list, where the streams lists
+        contains the data of each selected stream (it's a list of numpy
+        arrays), and streaminfo is a list of meta-data information about the
+        respective stream.
     """
-    def __init__(self, container, selected, audioresampler):
-        self.container = container.demux(selected)
-        self.selected = selected
-        self.warned = False
-        self.ar = audioresampler
-        self.framecount = dict( (s,0) for s in self.selected )
+    def perstep(container, selected):
+        pts, buf  = 0, []
 
-    def __packets2frames(self, ps):
-        def aud(ps):
-            try:
-                frames = [ self.ar.resample(f) for p in ps for f in p.decode() ]
-                frames = [ f for f in frames if f is not None ]
-                return None if len(frames) == 0 else frames
-            except:
-                return None
+        for packet in container:
+            #
+            # one of the streams is done
+            #
+            if packet.pts is None:
+                break
 
-        def vid(ps):
-            return None if not all(p.stream.codec.type=='video' for p in ps) else\
-                   [ f for p in ps for f in p.decode() ]
-
-        def sub(ps):
-            return None if not all(p.stream.codec.type=='subtitle' for p in ps) else\
-                   [ f for p in ps for f in p.decode() ]
-
-        return None if len(ps)==0 else\
-               aud(ps) or vid(ps) or sub(ps)
-
-
-    def __iter__(self):
-        def perpts(it):
-            """ collect all packets with matching pts fields, and store them
-            in a dict() indexed by each stream.
-            """
-            pts, buf = .0, { k: [] for k in self.selected }
-
-            def toframes():
-                frames = { s: self.__packets2frames(ps)\
-                           for (s,ps) in buf.items() }
-                valid = all( b is not None for (s,b) in frames.items()\
-                             if s.codec.type != 'subtitle' )
-
-                # sys.stderr.write("etf %s %s\n" % (valid, frames))
-                return frames if valid else None
-
-            for packet in it:
-                #
-                # check for end-of-stream
-                #
-                if packet.pts is None:
-                    break
-
-                #
-                # check if ready to emit
-                #
-                elif packet.pts != pts:
-                    frames = toframes()
-                    if frames:
-                        yield pts, frames
-
-                    pts, buf = packet.pts,\
-                    { s: [p for p in ps if p.pts+p.duration > packet.pts]\
-                      for (s,ps) in buf.items() }
-
-                #
-                # add the current packet to buf
-                #
-                buf[packet.stream].append(packet)
+            # for p in buf:
+            #     sys.stderr.write("%s %s  " % (p.pts, p.duration))
+            # sys.stderr.write("\n")
 
             #
-            # flush buffer at the end
+            # check if the packet is below the presentation time
+            # or if the buffer needs to be evicted
             #
-            frames = toframes()
-            if frames:
-                yield pts, frames
+            if packet.pts < pts + window:
+                buf.append(packet)
 
-        self.frames = perpts(self.container)
-        return self
-
-    def __next__(self):
-        #
-        # read as many packets as required to forward the presentation
-        # timestamp (pts) beyond what is buffered
-        #
-        pts, frames = next(self.frames)
-
-        def aud(frames):
-            """ concatenate multiple frames of audio date. When in packed format
-            unpack to channel first alignment.
-            """
-            if len(frames) == 0:
-                return None
-
-            f2a = lambda f: f.to_ndarray()
-            p2u = lambda a,f: a.reshape((len(f.layout.channels), -1))
-
-            return np.concatenate([\
-                f2a(frame) if not frame.format.is_packed else\
-                p2u(f2a(frame), frame) for frame in frames])
-
-        def vid(frames):
-            return None
-
-        def sub(frames):
-            """ duplicate subtitles to match the global sampling rate given.
-            """
-            if frames:
-                s2s = lambda f: f.ass.split(',')[-1].strip() if f else 'None'
-                return [", ".join(s2s(f[0]) for f in frames)]
             else:
-                return ['None']
+                #
+                # yield the buffer and remove all packets that
+                # are not valid anymore, and forward pts
+                #
+                yield pts, buf
 
-        frames.update( (s, aud(p) if s.codec.type == 'audio' else\
-                           vid(p) if s.codec.type == 'video' else\
-                           sub(p) if s.codec.type == 'subtitle' else\
-                           None) \
-                        for (s,p) in frames.items() )
+                pts += window
+                buf = [p for p in buf\
+                       if p.pts + p.duration > pts and\
+                          p.stream.codec.type == 'subtitle']
+                buf.append(packet)
 
         #
-        # multiply subtitle stream to even it out with the first audio stream
+        # flush the buffer at last
         #
-        factor = [ p.shape[-1] for (s,p) in frames.items() if s.codec.type=='audio']
-        factor = factor[0] if len(factor) else 1
+        yield pts, buf
 
-        frames.update( (s, p if s.codec.type != 'subtitle' else\
-                           np.array(p * factor)) for (s,p) in frames.items() )
+    def aud(s, packets):
+        #
+        # extract and concatenate all data frames for these audio streams
+        # XXX this is the place for re-sampling
+        #
+        frames = [f.to_ndarray().T if not f.format.is_packed else\
+                  f.to_ndarray().T.reshape((-1, len(f.layout.channels)))\
+                  for p in packets for f in p.decode()]
+        return avarray(concat(frames), info=s)
 
-        for s in self.selected:
-            if s.codec.type == 'audio':
-                self.framecount[s] += frames[s].shape[-1]
-            else:
-                self.framecount[s] += frames[s].shape[0]
+    def vid(s, packets):
+        #
+        # stack all single images of a video streams
+        #
+        frames = [f.to_ndarray().T for p in packets for f in p.decode()]
+        return avarray(stack(frames), info=s)
 
-        # sys.stderr.write("wtf %s\n" % dict ( (s, f.shape) for (s,f) in frames.items()))
-        # sys.stderr.write("wtf %s\n" % self.framecount)
-        # sys.stderr.write("ftf %s\n" % frames)
-        return frames.values()
+    def sub(packets, pts):
+        #
+        # only works for ass/text subtitle at the moment, extract only
+        # beginning and end time, and add the current text label to it
+        # prior to emission
+        # XXX support bitmap subs and additional optional subtitle attr
+        #
+        content = lambda s:\
+            s.ass.split(',')[-1].strip() if s.type == b'ass' else\
+            s.text                       if s.type == b'text' else\
+            None
+        beg = lambda p:\
+            p.pts - pts if p.pts > pts else 0
+        end = lambda p:\
+            beg(p) + p.duration if beg(p) + p.duration < window else window
 
-class windowarr:
-    """ Iterates over frames, and stacks them together to a larger time-window
-    block.
+        frames = [ (beg(p), end(p), content(s))\
+                   for p in packets for ss in p.decode() for s in ss]
+        return frames
+
+
+    #
+    # here we actually start reading data from the container
+    #
+    container = open(file or argv[1])
+    selected  = mapstreams(streams, container.streams)
+    container = container.demux(list(selected))
+
+    for pts, buf in perstep(container, selected):
+        buf = sorted(buf, key=lambda p: p.stream.index)
+        #
+        # we need to keep the order in which the stream were selected,
+        # hence we create a dict with all keys, and then add a default
+        # empty list for each prior to inserting the current frames
+        #
+        out = { k: [] for k in selected }
+        out.update( (s, list(v))\
+                    for (s,v) in groupby(buf, lambda p: p.stream) )
+        out.update( (s, aud(s,p) if s.codec.type == 'audio' else\
+                        vid(s,p) if s.codec.type == 'video' else\
+                   sub(p, pts) if s.codec.type == 'subtitle' else\
+                        None) for (s,p) in out.items() )
+
+        yield list(out.values())
+
+def read(streams=lambda x: list(x), file=None):
+    return list(input(streams, inf, file))[0]
+
+def annotate(frames, labels, rate=None):
     """
-    def __init__(self, frames, rate, secs):
-        self.frames = frames
-        self.multiplier = secs * rate
-
-        if self.multiplier - int(self.multiplier):
-            raise Exception("window must be dividable by rate")
-
-        self.multiplier = int(self.multiplier)
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        frame = next(self.frames)
-        n, window = frame[0].shape[1], next(self.frames)
-
-        while n < self.multiplier:
-            n += frame[0].shape[1]
-            window.extend(frame)
-
-        dimens = len(frame)
-        window = [ np.hstack(window[i::dimens]) for i in range(dimens) ]
-
-        return window
-
-class AvIO(object):
-    def __init__(self):
-        pass
-
-    def __call__(self,
-                 streams=lambda x: [s for s in x],
-                 file=None,
-                 rate=None,
-                 secs=None,
-                 info=None):
-
-        if rate is not None:
-            rate = int(rate)
-
-        audioresampler = av.audio.resampler.AudioResampler(None, None, rate)
-
-        # XXX rate can be None but secs not!
-
-        container = av.open(file or sys.argv[1])
-        selected = _mapstreams(streams, container.streams)
-        demuxed = demuxedarr(container, selected, audioresampler)
-        #windowed = windowarr(demuxed, rate, secs)
-
-        if info is not None:
-            for s in selected:
-                info.append(s)
-
-        return demuxed
-
-class AvIOComplete(AvIO):
-    """ returns the whole input file/stream
     """
+    dim = frames.shape[0]
+    out = empty((dim,), dtype=object); out[:] = None
+    scl = (rate or frames.info.sample_rate) / 1000.  # assume timebase to be 1/1000
 
-    def __call__(self,
-                 streams=lambda x: [s for s in x],
-                 file=None,
-                 rate=None):
-        """
-        read a multi-media file into memory completly.
+    for (a,b,label) in labels:
+        a, b = floor(a*scl), ceil(b*scl)
+        out[a:b] = label
 
-        Args:
-            streams: optional string or callable to specify streams, default is to read all
-            file: string or open file object to be read
-            rate: resample all streams to rate, defaults to read streams at rate given from file
+        if b > dim:
+            raise Exception("end of annotation beyond data dimension, wrong rate?")
 
-        Returns:
-            a tuple containing (streams, info) lists, the streams list contains
-            all list as numpy arrays, while info holds a metadata information
-            object for each stream.
-        """
-
-        info = []
-        buf = AvIO.__call__(self, streams,file,rate,info=info)
-        buf = map(list, zip(*buf))
-        buf = map(np.hstack, buf)
-        buf = list(buf)
-
-        return buf, info
-
-input = AvIO()
-read = AvIOComplete()
+    return out
 
 if __name__ == '__main__':
-    for a,b in input("a:27 a:26"):
+    for a,b in read("a:27 a:26", window=1000):
         print(a, b)

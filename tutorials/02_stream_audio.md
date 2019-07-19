@@ -1,39 +1,30 @@
 % stream audio-data from a ffmpeg URL
 
- While reading a file completely into memory is a convenient way to read data, there are situations where you do not want to wait until the data source is closed, or where you do not want to keep the whole file in memory. For example, when streaming live-data from your device, you usually do not want to wait for the recording to stop before processing it's data, or keep the whole recording indefinitely in memory. These are situation where the streaming API, that is modeled based on python's iterator pattern comes into play.
+ While reading a file completely into memory is a convenient way to read data, there are situations where you do not want to wait until the data source is closed, or where you do not want to keep the whole file in memory. For example, when streaming live-data from your device, you usually do not want to wait for the recording to stop before processing it's data, or keep the whole recording indefinitely in memory. These are the situations where the streaming API into play.
 
- Instead of using the 'read' function, we can use the 'input' in pretty much the same way. Only one parameter is added, which is the window size. This window size specifies the duration that is collected before a new block of data is yielded by the iterator and provided to work with. This means, the input is read in blocks, which have a window-size duration. 
+ Instead of using the 'read' function, we can use the 'input' in pretty much the same way. Only one parameter called 'window' is added. This window specifies the duration of data that is collected before a new block of data is yielded by the iterator. This means, the input is read in blocks, which span a duration of window. The window is specified in milli-seconds. For example to read an audio-file in blocks of one second, you can do:
 
+    >>> from tests.common import fate_suite
+    >>> from av.io import input
+    >>>
+    >>> audiofile = fate_suite('audio-reference/chorusnoise_2ch_44kHz_s16.wav')
+    >>> numframes = 0
+    >>> for stream, in input('a:0', 1000, audiofile):
+    ...   numframes += stream.shape[0]
+    >>> numframes
+    93209
 
-#    >>> from tests.common import fate_suite
-#    >>> from av.io import read
-#    >>>
-#    >>> audiofile = fate_suite('audio-reference/chorusnoise_2ch_44kHz_s16.wav')
-#    >>> for stream, in input('a:0', audiofile, 50, 1):
-#    ...   print(stream.shape)
-#    (2, 50)
-#    (2, 50)
-#    (2, 6)
+ The default window size is equivalent to 1000ms, so the following calls will yield the sample results as above:
 
- You can also call the function to just open all streams and their stored rate and with a window of one second:
+    >>> numframes = 0
+    >>> for stream, in input(file = audiofile):
+    ...   numframes += stream.shape[0]
+    >>> numframes
+    93209
 
+ The streaming API is most useful for video data:
 
-#   >>> for stream, in input(audiofile)
-#   ...   print(stream.shape)
-#   (2, 50)
-#   (2, 50)
-#   (2, 6)
-
- The numpy array objects that are returned by this function, contain additional information about the streams that are decoded. To access them there a special fields that are added at runtime (audiorate, …):
-
-#   >>> audiofile = fate_suite('audio-reference/chorusnoise_2ch_44kHz_s16.wav')
-#   >>> for stream, in input(audiofile)
-#   ...   print(stream.audiorate)
-#   44100
-#   44100
-#   44100
-
- As the simplest call it is enough to just open the file and will open all streams contained in the file and their default rate. If the rates will differ they will automatically be resampled to the greatest common divider so that they can be in a synchronous fashion:
-
-
+    >>> for aud,vid in input(file = fate_suite('mkv/1242-small.mkv')):
+    ...    print(vid.shape)
+    (11, 1280, 1077)
 
