@@ -4,6 +4,8 @@ from av.audio.plane cimport AudioPlane
 from av.deprecation import renamed_attr
 from av.utils cimport err_check
 
+import sys
+
 
 cdef object _cinit_bypass_sentinel
 
@@ -135,10 +137,9 @@ cdef class AudioFrame(Frame):
 
         :type: tuple
         """
-        cdef int plane_count = 0
-        while self.ptr.extended_data[plane_count]:
-            plane_count += 1
 
+        cdef int plane_count = 1 if not self.format.is_planar else\
+                               len(self.layout.channels)
         return tuple([AudioPlane(self, i) for i in range(plane_count)])
 
     property samples:

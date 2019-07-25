@@ -109,9 +109,9 @@ cdef class AudioLayout(object):
     property name:
         """The canonical name of the audio layout."""
         def __get__(self):
-            cdef char out[32]
+            cdef char out[128]
             # Passing 0 as number of channels... fix this later?
-            lib.av_get_channel_layout_string(out, 32, 0, self.layout)
+            lib.av_get_channel_layout_string(out, 128, 0, self.layout)
             return <str>out
 
 
