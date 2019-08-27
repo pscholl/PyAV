@@ -20,17 +20,17 @@
     >>> print( streams[0].shape )
     (93209, 2)
 
- The audio stream is actually 2.11 seconds long, hence the firs dimension of the array is the sample number, while the second dimension is the channel of the audio-file. If you know what kind of file you are reading you can use python's tuple extraction syntax to make data reading a little bit more obvious:
+ The audio stream is actually 2.11 seconds long, hence the first dimension of the array is the sample number, while the second dimension is the channel of the audio-file. If you know what kind of file you are reading you can use python's tuple unpacking syntax to make data reading a little bit more obvious:
 
     >>> audio, *_ = read(file=audiofile)
     >>> print(audio.shape)
     (93209, 2)
 
- which extracts the first list element in the returned tuple, while ignoring all subsequent elements if there are any. This can happen when your file contains multiple streams for example. Let's imagine that you like to extract audio data at a pre-determined rate, or have all streams sampled at the same rate. This requires a re-sampling of the audio/data stream to this rate, and pyav can do that for you. Just add a parameter to the read() method:
+ which extracts the first list element in the returned tuple, while ignoring all subsequent elements if there are any (see [tuple unpacking](https://www.geeksforgeeks.org/unpacking-a-tuple-in-python/)). This can happen when your file contains multiple streams for example. Let's imagine that you like to extract audio data at a pre-determined rate, or have all streams sampled at the same rate. This requires a re-sampling of the audio/data stream to this rate, and pyav can do that for you. Just add a parameter to the read() method:
 
-#    >>> (audio, *_) = read(file=audiofile, rate=50)
-#    >>> print(audio.info. shape)
-#    (2, 90)
+    >>> (audio, *_) = read(file=audiofile, rate=50)
+    >>> print(audio.info. shape)
+    (2, 90)
 
  Now, you have the data re-sampled to 50Hz (the lowest rate is 1Hz), so only 90 samples are returned. Luckily we already know that our input file only contains audio-data, and no subtitle neither video streams. Otherwise we might read streams that we do not need later on, increasing the overhead for reading data. We can however specify which streams should be read, and we have multiple options for that. The first one is to supply a callable, that will receive the list of streams that are in the file and must return a list of streams to be read. For example only reading audio streams:
 
@@ -72,3 +72,4 @@ and as you can see from the ffprobe output, the first stream contains two tags (
 
 These are all the ways to select streams from your containers. As file input you can use any URL that ffmpeg would handle, for example you also read from a TCP stream with '''read(file="tcp:192.168.0.1:2222")'''. See the [ffmpeg protocol](https://www.ffmpeg.org/ffmpeg-protocols.html) for more details.
 
+[1]: https://www.geeksforgeeks.org/unpacking-a-tuple-in-python/ 

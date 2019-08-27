@@ -159,7 +159,7 @@ def input(streams=lambda x: list(x), window=1000, file=None):
         #
         # stack all single images of a video streams
         #
-        frames = [f.to_ndarray().T for p in packets for f in p.decode()]
+        frames = [f.to_ndarray(format='rgb24').swapaxes(0,1) for p in packets for f in p.decode()]
         return avarray(stack(frames), info=s)
 
     def sub(packets, pts):
@@ -168,6 +168,7 @@ def input(streams=lambda x: list(x), window=1000, file=None):
         # beginning and end time, and add the current text label to it
         # prior to emission
         # XXX support bitmap subs and additional optional subtitle attr
+        # XXX subtitles are a subclass of tuples then
         #
         content = lambda s:\
             s.ass.split(',')[-1].strip() if s.type == b'ass' else\
@@ -200,9 +201,9 @@ def input(streams=lambda x: list(x), window=1000, file=None):
         out = { k: [] for k in selected }
         out.update( (s, list(v))\
                     for (s,v) in groupby(buf, lambda p: p.stream) )
-        out.update( (s, aud(s,p) if s.codec.type == 'audio' else\
-                        vid(s,p) if s.codec.type == 'video' else\
-                   sub(p, pts) if s.codec.type == 'subtitle' else\
+        out.update( (s, aud(s,p)    if s.codec.type == 'audio' else\
+                        vid(s,p)    if s.codec.type == 'video' else\
+                        sub(p, pts) if s.codec.type == 'subtitle' else\
                         None) for (s,p) in out.items() )
 
         yield list(out.values())
@@ -211,7 +212,30 @@ def read(streams=lambda x: list(x), file=None):
     return list(input(streams, inf, file))[0]
 
 def annotate(frames, labels, rate=None):
-    """
+    """ this is a helper function to convert from a time-centric view of
+    subtitle tuples, i.e. (beg, end, caption) where beg and end are timestamps in
+    milli-second and caption is a string, to a time-discrete view, i.e. an array
+    in which each entry designates a value for a clearly defined duration (one
+    period of the sampling rate).
+
+    Args:
+     frames: an array, of which the first dimension will be taken to generate an
+             array of labels of the same length.
+
+     labels: a list of tuples (beg, end, label) that will be convrted to a
+             discrete-time view, beg and end are timestamp in milli-seconds,
+             relative to the first sample in the frames array.
+
+     rate: an optional argument, if not specified frames.info.sample_rate will
+           be used (which is added by the read() and input() method). Sepcifies
+           the rate to convert to in Hz.
+
+    Returns:
+     an array of size nx1 where n is equal to the first dimension of the frames
+     array. Each entry of the retunerd array will be equal to the caption/label
+     that was active at that time, i.e. taking any index i in the returned
+     array, beg <= i*rate*1000 < end iff the value at index i is equal to any
+     label in the labels array.
     """
     dim = frames.shape[0]
     out = empty((dim,), dtype=object); out[:] = None
