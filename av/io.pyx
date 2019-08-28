@@ -32,12 +32,23 @@ def mapstreams(strorfun, streams):
         a filtered list of streams
     """
     #
+    # select by name and throw exception if no stream is found
+    #
+    def bytag(needle, tag, streams):
+        sel = [x for x in streams if\
+               needle in x.metadata.get(tag, str(getattr(x,tag,''))).lower()]
+
+        if len(sel) == 0:
+            raise Exception("no stream found matchin %s" % token)
+
+        return sel
+
+    #
     # select, probably overlapping streams, by the specifications given
     # in the single token
     #
     def _mapspecifier(token, streams):
-        byname = lambda m,s: [x for x in s if\
-                m in x.metadata.get('NAME', '').lower()]
+        byname = lambda m,s: bytag(m, 'NAME', s)
         bytype = lambda t,s:\
                 s.audio     if t=='a' else\
                 s.video     if t=='v' else\
@@ -46,13 +57,11 @@ def mapstreams(strorfun, streams):
         bynumber = lambda t,n,s:\
                 bytype(t,s) if n=='' else\
                 [bytype(t,s)[int(n)]]
-        bynamedtag = lambda k,v,s: [x for x in s if\
-                v in x.metadata.get(k, str(getattr(x, k, '')))]
 
         selector = {
             r'([avsd]):(\d+)' : bynumber,
             r'([avsf]):'      : bytype,
-            r'(\w+):(\w+)'    : bynamedtag,
+            r'(\w+):(\w+)'    : bytag,
             r'(\w+)'          : byname, }
 
         for pattern, fun in selector.items():

@@ -1,4 +1,4 @@
-% stream audio-data from a ffmpeg URL
+% stream data from a ffmpeg URL
 
  While reading a file completely into memory is a convenient way to read data, there are situations where you do not want to wait until the data source is closed, or where you do not want to keep the whole file in memory. For example, when streaming live-data from your device, you usually do not want to wait for the recording to stop before processing it's data, or keep the whole recording indefinitely in memory. These are the situations where the streaming API into play.
 
@@ -26,5 +26,4 @@
 
     >>> for aud,vid in input(file = fate_suite('mkv/1242-small.mkv')):
     ...    print(vid.shape)
-    (11, 1280, 1077)
-
+    (11, 1280, 718, 3)
