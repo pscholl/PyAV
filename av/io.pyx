@@ -221,7 +221,6 @@ def input(streams=lambda x: list(x), window=1000, file=None):
                         sub(p, pts) if s.codec.type == 'subtitle' else\
                         None) for (s,p) in out.items() )
 
-        sys.stderr.write("%f %s %s\n" % (pts, buf, out))
         yield list(out.values())
 
 def read(streams=lambda x: list(x), file=None):
