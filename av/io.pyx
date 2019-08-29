@@ -247,15 +247,21 @@ def annotate(frames, labels, rate=None):
      label in the labels array.
     """
     dim = frames.shape[0]
-    out = empty((dim,), dtype=object); out[:] = None
-    scl = (rate or frames.info.sample_rate) / 1000.  # assume timebase to be 1/1000
+    out = empty((dim,), dtype=object); out[:] = 'NULL'
+
+    try: # assume timebase to be 1/1000
+        scl = rate or frames.info.sample_rate
+    except:
+        scl = rate or frames.info.framerate
+    finally:
+        scl /= 1000.
 
     for (a,b,label) in labels:
         a, b = floor(a*scl), ceil(b*scl)
         out[a:b] = label
 
-        if b > dim:
-            raise Exception("end of annotation beyond data dimension, wrong rate?")
+        #if b > dim:
+        #    raise Exception("end of annotation beyond data dimension, wrong rate?")
 
     return out
 
