@@ -141,7 +141,7 @@ def input(streams=lambda x: list(x), window=1000, file=None):
                 # yield the buffer and remove all packets that
                 # are not valid anymore, and forward pts
                 #
-                yield pts, buf
+                yield pts, [p for p in buf if p.pts < pts + window]
 
                 pts += window
                 buf = [p for p in buf\
@@ -152,7 +152,13 @@ def input(streams=lambda x: list(x), window=1000, file=None):
         #
         # flush the buffer at last
         #
-        yield pts, buf
+        while len(buf):
+            pts += window
+            buf = [p for p in buf\
+                   if p.pts + p.duration > pts and\
+                      p.stream.codec.type == 'subtitle']
+
+            yield pts, [p for p in buf if p.pts < pts + window]
 
     def aud(s, packets):
         #
@@ -186,7 +192,7 @@ def input(streams=lambda x: list(x), window=1000, file=None):
         beg = lambda p:\
             p.pts - pts if p.pts > pts else 0
         end = lambda p:\
-            beg(p) + p.duration if beg(p) + p.duration < window else window
+            p.pts + p.duration - pts if p.pts + p.duration < pts + window else window
 
         frames = [ (beg(p), end(p), content(s))\
                    for p in packets for ss in p.decode() for s in ss]
@@ -215,6 +221,7 @@ def input(streams=lambda x: list(x), window=1000, file=None):
                         sub(p, pts) if s.codec.type == 'subtitle' else\
                         None) for (s,p) in out.items() )
 
+        sys.stderr.write("%f %s %s\n" % (pts, buf, out))
         yield list(out.values())
 
 def read(streams=lambda x: list(x), file=None):
