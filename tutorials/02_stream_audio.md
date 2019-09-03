@@ -8,11 +8,12 @@
     >>> from av.io import input
     >>>
     >>> audiofile = fate_suite('audio-reference/chorusnoise_2ch_44kHz_s16.wav')
-    >>> numframes = 0
-    >>> for stream, in input('a:0', 1000, audiofile):
+    >>> numframes, calls = 0, 0
+    >>> for stream, in input('a:0', 1000, file=audiofile):
     ...   numframes += stream.shape[0]
-    >>> numframes
-    93209
+    ...   calls += 1
+    >>> numframes, calls
+    (95257, 3)
 
  The default window size is equivalent to 1000ms, so the following calls will yield the sample results as above:
 
@@ -20,7 +21,7 @@
     >>> for stream, in input(file = audiofile):
     ...   numframes += stream.shape[0]
     >>> numframes
-    93209
+    95257
 
  The streaming API is most useful for video data:
 

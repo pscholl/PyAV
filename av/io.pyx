@@ -1,11 +1,12 @@
 import sys
-from av import open
+from av import open, AudioResampler
 from sys import argv
 from itertools import groupby
 from collections import OrderedDict
 from numpy import concatenate as concat, stack, empty, ndarray, asarray
 from math import inf, floor, ceil, isinf
 from re import split, match
+from fractions import Fraction as frac
 
 class avarray(ndarray):
     """ array with metadata from the libav container, i.e. sample-rate etc.,
@@ -34,12 +35,12 @@ def mapstreams(strorfun, streams):
     #
     # select by name and throw exception if no stream is found
     #
-    def bytag(needle, tag, streams):
-        sel = [x for x in streams if\
-               needle in x.metadata.get(tag, str(getattr(x,tag,''))).lower()]
+    def bytag(tag, needle, streams):
+        get = lambda x: x.metadata.get(tag, str(getattr(x,tag,''))).lower()
+        sel = [x for x in streams if needle in get(x)]
 
         if len(sel) == 0:
-            raise Exception("no stream found matchin %s" % token)
+            raise Exception("no stream found matching %s" % token)
 
         return sel
 
@@ -80,8 +81,7 @@ def mapstreams(strorfun, streams):
                  for token in split(r'(?<!\\) ', strorfun)\
                  for elem  in _mapspecifier(token, streams) ]))
 
-
-def input(streams=lambda x: list(x), window=1000, file=None):
+def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
     """ reads a multimedia file with ffmpeg/libav and returns blocks of
     for each stream in a demultiplexed way.
 
@@ -102,6 +102,9 @@ def input(streams=lambda x: list(x), window=1000, file=None):
         window: defaults to 1000ms, and will read until the EOF is reached.
                 If any number is given, the method will yield a block of data
                 whenever 'window' milli-seconds of data were read.
+        rate: an integer [1-n] giving the audio-rate in Hz, on which all streams
+              should be resampled to. Defaults to None, which select the rate in
+              which each stream is stored in.
         file: optional string which specifies the input to be read, can be
               anything that libav/ffmpeg can read including, for example,
               tcp/udp/rtmp network streams, any file, or even pipes. For a
@@ -115,9 +118,11 @@ def input(streams=lambda x: list(x), window=1000, file=None):
         arrays), and streaminfo is a list of meta-data information about the
         respective stream.
     """
-    def perstep(container, selected):
-        pts, buf  = 0, []
+    TIMEBASE = frac(1,1000)
+    window = window * TIMEBASE
 
+    def perstep(container, selected):
+        pts, buf = 0 * TIMEBASE, []
         for packet in container:
             #
             # one of the streams is done
@@ -125,15 +130,30 @@ def input(streams=lambda x: list(x), window=1000, file=None):
             if packet.pts is None:
                 break
 
+            packet_pts = packet.pts * packet.time_base
+            packet_duration = packet.duration * packet.time_base
+
+            #
+            # this happens when streams of a container are encoded with too
+            # much gaps between streams. This yields packets being decoded
+            # after the pts has already been moved forward by another stream.
+            #
+            if packet_pts < pts:
+                sys.stderr.write(\
+                "WARN: file is encoded with asynchronous streams, streams are"+\
+                "out of sync, re-encode with ffmpeg -max_interleave_delta 0\n")
+
+            # sys.stderr.write("%s \n" % (packet.time_base))
+            # sys.stderr.write("%s (%s) " % (pts, window))
             # for p in buf:
-            #     sys.stderr.write("%s %s  " % (p.pts, p.duration))
+            #     sys.stderr.write("%s %s  " % (p.pts * p.time_base, p.duration * p.time_base))
             # sys.stderr.write("\n")
 
             #
             # check if the packet is below the presentation time
             # or if the buffer needs to be evicted
             #
-            if packet.pts < pts + window:
+            if packet_pts < pts + window:
                 buf.append(packet)
 
             else:
@@ -141,33 +161,39 @@ def input(streams=lambda x: list(x), window=1000, file=None):
                 # yield the buffer and remove all packets that
                 # are not valid anymore, and forward pts
                 #
-                yield pts, [p for p in buf if p.pts < pts + window]
+                yield pts, [p for p in buf if p.pts * p.time_base < pts + window]
 
                 pts += window
-                buf = [p for p in buf\
-                       if p.pts + p.duration > pts and\
-                          p.stream.codec.type == 'subtitle']
+                buf = [p for p in buf if (p.pts + p.duration) * p.time_base >= pts]
                 buf.append(packet)
 
         #
         # flush the buffer at last
         #
         while len(buf):
-            pts += window
-            buf = [p for p in buf\
-                   if p.pts + p.duration > pts and\
-                      p.stream.codec.type == 'subtitle']
+            yield pts, [p for p in buf if p.pts * p.time_base < pts + window]
 
-            yield pts, [p for p in buf if p.pts < pts + window]
+            pts += window
+            buf = [p for p in buf if (p.pts + p.duration) * p.time_base >= pts]
+
+    #
+    # initialize the audio-resampler, if required
+    #
+    if rate is not None and rate < 1:
+        raise Exception("audio-rate must be larger than 1")
+    resample = AudioResampler(rate=rate).resample
 
     def aud(s, packets):
         #
         # extract and concatenate all data frames for these audio streams
-        # XXX this is the place for re-sampling
         #
+        def f2pts(frame):
+            frame.pts = None
+            return frame
+        frames = (resample(f2pts(f)) for p in packets for f in p.decode())
         frames = [f.to_ndarray().T if not f.format.is_packed else\
                   f.to_ndarray().T.reshape((-1, len(f.layout.channels)))\
-                  for p in packets for f in p.decode()]
+                  for f in frames if f is not None]
         return avarray(concat(frames), info=s)
 
     def vid(s, packets):
@@ -186,15 +212,16 @@ def input(streams=lambda x: list(x), window=1000, file=None):
         # XXX subtitles are a subclass of tuples then
         #
         content = lambda s:\
-            s.ass.split(',')[-1].strip() if s.type == b'ass' else\
-            s.text                       if s.type == b'text' else\
+            ",".join(s.ass.split(',')[9:]).strip() if s.type == b'ass' else\
+            s.text                                 if s.type == b'text' else\
             None
         beg = lambda p:\
-            p.pts - pts if p.pts > pts else 0
+            p.pts * p.time_base - pts if p.pts > pts else 0
         end = lambda p:\
-            p.pts + p.duration - pts if p.pts + p.duration < pts + window else window
+            (p.pts + p.duration) * p.time_base - pts if\
+            (p.pts + p.duration) * p.time_base < pts + window else window
 
-        frames = [ (beg(p), end(p), content(s))\
+        frames = [ (int(beg(p)/TIMEBASE), int(end(p)/TIMEBASE), content(s))\
                    for p in packets for ss in p.decode() for s in ss]
         return frames
 
@@ -221,10 +248,11 @@ def input(streams=lambda x: list(x), window=1000, file=None):
                         sub(p, pts) if s.codec.type == 'subtitle' else\
                         None) for (s,p) in out.items() )
 
+        #sys.stderr.write("%f %s\n" % (pts, buf))
         yield list(out.values())
 
-def read(streams=lambda x: list(x), file=None):
-    return list(input(streams, inf, file))[0]
+def read(streams=lambda x: list(x), rate=None, file=None):
+    return list(input(streams, inf, rate, file))[0]
 
 def annotate(frames, labels, rate=None):
     """ this is a helper function to convert from a time-centric view of
@@ -260,7 +288,7 @@ def annotate(frames, labels, rate=None):
     except:
         scl = rate or frames.info.framerate
     finally:
-        scl /= 1000.
+        scl *= frames.info.time_base
 
     for (a,b,label) in labels:
         a, b = floor(a*scl), ceil(b*scl)

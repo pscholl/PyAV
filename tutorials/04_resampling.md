@@ -6,5 +6,5 @@
     >>> from av.io import input
     >>>
     >>> audiofile = fate_suite('audio-reference/chorusnoise_2ch_44kHz_s16.wav')
-    >>> for stream, in input('a:0', 1000, audiofile, rate=50):
+    >>> for stream, in input('a:0', 1000, 200, audiofile):
     ...   print(stream.shape)

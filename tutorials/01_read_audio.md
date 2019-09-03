@@ -29,8 +29,8 @@
  which extracts the first list element in the returned tuple, while ignoring all subsequent elements if there are any (see [tuple unpacking](https://www.geeksforgeeks.org/unpacking-a-tuple-in-python/)). This can happen when your file contains multiple streams for example. Let's imagine that you like to extract audio data at a pre-determined rate, or have all streams sampled at the same rate. This requires a re-sampling of the audio/data stream to this rate, and pyav can do that for you. Just add a parameter to the read() method:
 
     >>> (audio, *_) = read(file=audiofile, rate=50)
-    >>> print(audio.info. shape)
-    (2, 90)
+    >>> print(audio.shape)
+    (90, 2)
 
  Now, you have the data re-sampled to 50Hz (the lowest rate is 1Hz), so only 90 samples are returned. Luckily we already know that our input file only contains audio-data, and no subtitle neither video streams. Otherwise we might read streams that we do not need later on, increasing the overhead for reading data. We can however specify which streams should be read, and we have multiple options for that. The first one is to supply a callable, that will receive the list of streams that are in the file and must return a list of streams to be read. For example only reading audio streams:
 
