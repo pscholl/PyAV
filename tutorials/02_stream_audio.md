@@ -13,7 +13,7 @@
     ...   numframes += stream.shape[0]
     ...   calls += 1
     >>> numframes, calls
-    (95257, 3)
+    (93209, 3)
 
  The default window size is equivalent to 1000ms, so the following calls will yield the sample results as above:
 
@@ -21,7 +21,7 @@
     >>> for stream, in input(file = audiofile):
     ...   numframes += stream.shape[0]
     >>> numframes
-    95257
+    93209
 
  The streaming API is most useful for video data:
 

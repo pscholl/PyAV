@@ -120,6 +120,7 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
     """
     TIMEBASE = frac(1,1000)
     window = window * TIMEBASE
+    pktdur = lambda p: (p.pts + p.duration) * p.time_base
 
     def perstep(container, selected):
         pts, buf = 0 * TIMEBASE, []
@@ -161,20 +162,20 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
                 # yield the buffer and remove all packets that
                 # are not valid anymore, and forward pts
                 #
-                yield pts, [p for p in buf if p.pts * p.time_base < pts + window]
+                yield pts, [p for p in buf if pktdur(p) < pts + window]
+                buf = [p for p in buf if pktdur(p) >= pts + window]
 
-                pts += window
-                buf = [p for p in buf if (p.pts + p.duration) * p.time_base >= pts]
                 buf.append(packet)
+                pts += window
 
         #
         # flush the buffer at last
         #
         while len(buf):
-            yield pts, [p for p in buf if p.pts * p.time_base < pts + window]
+            yield pts, [p for p in buf if pktdur(p) < pts + window]
+            buf = [p for p in buf if pktdur(p) >= pts + window]
 
             pts += window
-            buf = [p for p in buf if (p.pts + p.duration) * p.time_base >= pts]
 
     #
     # initialize the audio-resampler, if required
@@ -185,12 +186,11 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
 
     def aud(s, packets):
         #
-        # extract and concatenate all data frames for these audio streams
+        # extract and concatenate all data frames for these audio streams,
+        # make sure to flush the resampler with resample(None)
         #
-        def f2pts(frame):
-            frame.pts = None
-            return frame
-        frames = (resample(f2pts(f)) for p in packets for f in p.decode())
+        frames = [ resample(f) for p in packets for f in p.decode() ] +\
+                 [ resample(None) ]
         frames = [f.to_ndarray().T if not f.format.is_packed else\
                   f.to_ndarray().T.reshape((-1, len(f.layout.channels)))\
                   for f in frames if f is not None]
