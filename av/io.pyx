@@ -49,7 +49,7 @@ def mapstreams(strorfun, streams):
     # in the single token
     #
     def _mapspecifier(token, streams):
-        byname = lambda m,s: bytag(m, 'NAME', s)
+        byname = lambda m,s: bytag('NAME', m, s)
         bytype = lambda t,s:\
                 s.audio     if t=='a' else\
                 s.video     if t=='v' else\
