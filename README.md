@@ -23,6 +23,29 @@ Introduction to pyav
 
 [![Travis Build Status][travis-badge]][travis] [![AppVeyor Build Status][appveyor-badge]][appveyor] \
 [![GitHub Test Status][github-tests-badge]][github-tests] \
+
+This is a branch of the pyav library, with a simplified version to read multi-media file. Its main purpose is for reading multi-modal Activity Recognition datasets, like the [wetlab](http://earth.informatik.uni-freiburg.de/datasets/ubicomp2015) with is encoded in multiple matroska files. You can download an example file [here](http://earth.informatik.uni-freiburg.de/uploads/104.mkv), which contains video, audio and subtitle streams with a name tag. The video contains secondary evidence, audio streams encode sensor data (acceleration in this example), and the subtitle stream contains the ground-truth data. You can read, for example, read the sensor and groundtruth data with:
+
+```
+from av.io import read, annotate
+
+acc, groundtruth = read('a: s:', file='104.mkv')
+print(acc.info, acc.shape, len(gt))
+av.AudioStream #1 flac at 50Hz, 3.0, s16 at 0x7f3ec930e440 (122880, 3)
+
+# getting from a list of labels to an array of labels in-sync with sensordata
+labels = annotate(acc, groundtruth)
+print(labels.shape)
+(122880, )
+```
+
+More example are in the [tutorial/](tutorial/) directory.
+
+Introduction to pyav
+--------------------
+
+[![Travis Build Status][travis-badge]][travis] [![AppVeyor Build Status][appveyor-badge]][appveyor] \
+>>>>>>> more info in the READMe
 [![Gitter Chat][gitter-badge]][gitter] [![Documentation][docs-badge]][docs] \
 
 PyAV is a Pythonic binding for the [FFmpeg][ffmpeg] libraries. We aim to provide all of the power and control of the underlying library, but manage the gritty details as much as possible.
