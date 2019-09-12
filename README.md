@@ -16,7 +16,7 @@ print(labels.shape)
 (122880, )
 ```
 
-More example are in the [tutorial/](tutorial/) directory.
+More example are in the [tutorials/](tutorials/) directory.
 
 Introduction to pyav
 --------------------
