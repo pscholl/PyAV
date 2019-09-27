@@ -149,6 +149,7 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
             # for p in buf:
             #     sys.stderr.write("%s %s  " % (p.pts * p.time_base, p.duration * p.time_base))
             # sys.stderr.write("\n")
+            # sys.stderr.write("\n")
 
             #
             # check if the packet is below the presentation time
@@ -240,16 +241,20 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
         # hence we create a dict with all keys, and then add a default
         # empty list for each prior to inserting the current frames
         #
-        out = { k: [] for k in selected }
-        out.update( (s, list(v))\
-                    for (s,v) in groupby(buf, lambda p: p.stream) )
-        out.update( (s, aud(s,p)    if s.codec.type == 'audio' else\
-                        vid(s,p)    if s.codec.type == 'video' else\
-                        sub(p, pts) if s.codec.type == 'subtitle' else\
-                        None) for (s,p) in out.items() )
+        try:
+            out = { k: [] for k in selected }
+            out.update( (s, list(v))\
+                        for (s,v) in groupby(buf, lambda p: p.stream) )
+            out.update( (s, aud(s,p)    if s.codec.type == 'audio' else\
+                            vid(s,p)    if s.codec.type == 'video' else\
+                            sub(p, pts) if s.codec.type == 'subtitle' else\
+                            None) for (s,p) in out.items() )
 
-        #sys.stderr.write("%f %s\n" % (pts, buf))
-        yield list(out.values())
+            #sys.stderr.write("%f %s\n" % (pts, buf))
+            yield list(out.values())
+
+        except ValueError as e:
+            raise Exception("this is a BUG: try increasing the window size")
 
 def read(streams=lambda x: list(x), rate=None, file=None):
     return list(input(streams, inf, rate, file))[0]
