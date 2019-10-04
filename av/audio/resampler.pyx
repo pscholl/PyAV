@@ -116,9 +116,10 @@ cdef class AudioResampler(object):
 
         # Assert that the PTS are what we expect.
         cdef int64_t expected_pts
+        import sys
         if frame is not None and frame.ptr.pts != lib.AV_NOPTS_VALUE:
-            expected_pts = <int64_t>(self.pts_per_sample_in * self.samples_in)
-            if frame.ptr.pts != expected_pts:
+            expected_pts = <int64_t>int(self.pts_per_sample_in * self.samples_in)
+            if abs(frame.ptr.pts - expected_pts) > 1: # be more lenient, libav might use different arithmetics
                 raise ValueError('Input frame pts %d != expected %d; fix or set to None.' % (frame.ptr.pts, expected_pts))
             self.samples_in += frame.ptr.nb_samples
 

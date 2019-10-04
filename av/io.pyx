@@ -119,8 +119,7 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
         respective stream.
     """
     TIMEBASE = frac(1,1000)
-    window = window * TIMEBASE
-    pktdur = lambda p: (p.pts + p.duration) * p.time_base
+    window *= TIMEBASE
 
     def perstep(container, selected):
         pts, buf = 0 * TIMEBASE, []
@@ -132,7 +131,6 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
                 break
 
             packet_pts = packet.pts * packet.time_base
-            packet_duration = packet.duration * packet.time_base
 
             #
             # this happens when streams of a container are encoded with too
@@ -141,13 +139,14 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
             #
             if packet_pts < pts:
                 sys.stderr.write(\
-                "WARN: file is encoded with asynchronous streams, streams are"+\
+                "WARN: file is encoded with asynchronous streams, streams are "+\
                 "out of sync, re-encode with ffmpeg -max_interleave_delta 0\n")
 
             # sys.stderr.write("%s \n" % (packet.time_base))
             # sys.stderr.write("%s (%s) " % (pts, window))
             # for p in buf:
-            #     sys.stderr.write("%s %s  " % (p.pts * p.time_base, p.duration * p.time_base))
+            #     sys.stderr.write("%s\n" % str(p))
+            #     sys.stderr.write("%s: %s %s  " % (p.stream, p.pts * p.time_base, p.duration * p.time_base))
             # sys.stderr.write("\n")
             # sys.stderr.write("\n")
 
@@ -155,75 +154,85 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
             # check if the packet is below the presentation time
             # or if the buffer needs to be evicted
             #
-            if packet_pts < pts + window:
-                buf.append(packet)
+            if packet_pts > pts + window:
+                yield pts, buf
+                pts, buf = pts+window, []
 
-            else:
-                #
-                # yield the buffer and remove all packets that
-                # are not valid anymore, and forward pts
-                #
-                yield pts, [p for p in buf if pktdur(p) < pts + window]
-                buf = [p for p in buf if pktdur(p) >= pts + window]
-
-                buf.append(packet)
-                pts += window
+            buf.append(packet)
 
         #
         # flush the buffer at last
         #
-        while len(buf):
-            yield pts, [p for p in buf if pktdur(p) < pts + window]
-            buf = [p for p in buf if pktdur(p) >= pts + window]
-
-            pts += window
+        if len(buf):
+            yield pts, buf
 
     #
     # initialize the audio-resampler, if required
+    # and do a few sanity checks
     #
-    if rate is not None and rate < 1:
-        raise Exception("audio-rate must be larger than 1")
     resample = AudioResampler(rate=rate).resample
 
-    def aud(s, packets):
+    if rate is not None and rate < 1:
+        raise Exception("audio-rate must be larger than 1")
+
+    #if window is not inf:
+    #    check if sample rates are dividable by window
+    #    if rate is not None
+
+    def aud(s, packets, rest=None):
         #
         # extract and concatenate all data frames for these audio streams,
-        # make sure to flush the resampler with resample(None)
+        # make sure to flush the resampler with resample(None).
         #
-        frames = [ resample(f) for p in packets for f in p.decode() ] +\
-                 [ resample(None) ]
+        # For audio-only: libav returns a frame that may contain more samples
+        # than what the user specified in with window, hence we split the
+        # resulting array here again.
+        #
+        frames = [resample(f) for p in packets for f in p.decode()] +\
+                 [resample(None)]
         frames = [f.to_ndarray().T if not f.format.is_packed else\
                   f.to_ndarray().T.reshape((-1, len(f.layout.channels)))\
                   for f in frames if f is not None]
-        return avarray(concat(frames), info=s)
+
+        if rest is not None:
+            frames[0:0] = [rest]
+
+        return avarray(concat(frames) if len(frames) else [], info=s)
 
     def vid(s, packets):
         #
         # stack all single images of a video streams
         #
-        frames = [f.to_ndarray(format='rgb24').swapaxes(0,1) for p in packets for f in p.decode()]
-        return avarray(stack(frames), info=s)
+        frames = [f.to_ndarray(format='rgb24').swapaxes(0,1)\
+                  for p in packets for f in p.decode()]
+        return avarray(stack(frames) if len(frames) else [], info=s)
 
-    def sub(packets, pts):
+    def sub(packets, pts, rest=None):
         #
         # only works for ass/text subtitle at the moment, extract only
-        # beginning and end time, and add the current text label to it
-        # prior to emission
+        # start and end time, and text.
         # XXX support bitmap subs and additional optional subtitle attr
-        # XXX subtitles are a subclass of tuples then
+        # XXX subtitles should be a subclass of tuples then
         #
         content = lambda s:\
             ",".join(s.ass.split(',')[9:]).strip() if s.type == b'ass' else\
             s.text                                 if s.type == b'text' else\
             None
-        beg = lambda p:\
-            p.pts * p.time_base - pts if p.pts > pts else 0
-        end = lambda p:\
-            (p.pts + p.duration) * p.time_base - pts if\
-            (p.pts + p.duration) * p.time_base < pts + window else window
+        beg = lambda p:  p.pts * p.time_base - pts
+        end = lambda p: (p.pts + p.duration) * p.time_base - pts
 
         frames = [ (int(beg(p)/TIMEBASE), int(end(p)/TIMEBASE), content(s))\
                    for p in packets for ss in p.decode() for s in ss]
+
+        if rest is not None:
+            #
+            # This is not very nice, but it removes all outdated subtitle frames
+            # from the emission queue
+            #
+            rest = [ (b-window, e-window, t) for (b,e,t) in rest\
+                     if e-window > 0 ]
+            frames[0:0] = [rest]
+
         return frames
 
 
@@ -234,27 +243,45 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
     selected  = mapstreams(streams, container.streams)
     container = container.demux(list(selected))
 
+    #
+    # we create a buffer for each stream, that is filled at each
+    # window step, with the decoded frames, 
+    #
+    out  = { s: None for s in selected }
+    amax = { s: None               if isinf(window) else\
+                int(window*rate)   if rate is not None else\
+                int(window*s.rate) for s in out.keys() }
+
     for pts, buf in perstep(container, selected):
+        #
+        # make sure that groupby is working as expected (it works like unix' uniq)
+        #
         buf = sorted(buf, key=lambda p: p.stream.index)
-        #
-        # we need to keep the order in which the stream were selected,
-        # hence we create a dict with all keys, and then add a default
-        # empty list for each prior to inserting the current frames
-        #
-        try:
-            out = { k: [] for k in selected }
-            out.update( (s, list(v))\
-                        for (s,v) in groupby(buf, lambda p: p.stream) )
-            out.update( (s, aud(s,p)    if s.codec.type == 'audio' else\
-                            vid(s,p)    if s.codec.type == 'video' else\
-                            sub(p, pts) if s.codec.type == 'subtitle' else\
-                            None) for (s,p) in out.items() )
 
-            #sys.stderr.write("%f %s\n" % (pts, buf))
-            yield list(out.values())
+        out.update( (s,\
+            aud(s,p, out[s])   if s.codec.type == 'audio' else\
+            sub(p,pts, out[s]) if s.codec.type == 'subtitle' else\
+            vid(s,p)           if s.codec.type == 'video' else\
+            None)  for (s,p) in groupby(buf, lambda p: p.stream) )
 
-        except ValueError as e:
-            raise Exception("this is a BUG: try increasing the window size")
+        #
+        # we need to yield in the same order as the stream selection input,
+        # and make sure that not more than window-size is yielded. Only
+        # audio and subtitle can contain data valid after pts+window.
+        #
+        yield [ out[s][:amax[s]] if s.codec.type == 'audio' else\
+                out[s]           for s in selected ]
+
+        #
+        # now evict everything that was yielded, and became invalid in this
+        # step.
+        #
+        out.update( (s,\
+            out[s][amax[s]:]   if s.codec.type == 'audio' else\
+            out[s]             if s.codec.type == 'subtitle' else\
+            None               if s.codec.type == 'video' else\
+            None)  for (s,p) in groupby(buf, lambda p: p.stream) )
+
 
 def read(streams=lambda x: list(x), rate=None, file=None):
     return list(input(streams, inf, rate, file))[0]

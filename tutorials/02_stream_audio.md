@@ -8,12 +8,13 @@
     >>> from av.io import input
     >>>
     >>> audiofile = fate_suite('audio-reference/chorusnoise_2ch_44kHz_s16.wav')
-    >>> numframes, calls = 0, 0
-    >>> for stream, in input('a:0', 1000, file=audiofile):
-    ...   numframes += stream.shape[0]
-    ...   calls += 1
-    >>> numframes, calls
-    (93209, 3)
+    >>> for stream,*_ in input(streams='a:0', window=500, rate=1000, file=audiofile):
+    ...   print(stream.shape)
+    (500, 2)
+    (500, 2)
+    (500, 2)
+    (500, 2)
+    (114, 2)
 
  The default window size is equivalent to 1000ms, so the following calls will yield the sample results as above:
 
@@ -23,8 +24,12 @@
     >>> numframes
     93209
 
- The streaming API is most useful for video data:
+ The streaming API is most useful for video data as a complete video file can hardly fit into main memory:
 
-    >>> for aud,vid in input(file = fate_suite('mkv/1242-small.mkv')):
-    ...    print(vid.shape)
-    (11, 1280, 718, 3)
+    >>> mkvfile = fate_suite('mkv/1242-small.mkv')
+    >>> for vid,aud in input('v:0 a:0', window=150, file = mkvfile):
+    ...    print(vid.shape, aud.shape)
+    (3, 1280, 718, 3) (7200, 2)
+    (1, 1280, 718, 3) (7200, 2)
+    (4, 1280, 718, 3) (7200, 2)
+    (3, 1280, 718, 3) (2976, 2)
