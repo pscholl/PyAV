@@ -72,7 +72,6 @@ deploy-docs: docs
 
 
 
-clean: clean-build
 
 clean-build:
 	- rm -rf build
@@ -90,4 +89,5 @@ clean-docs:
 	- rm tmp/tagfile.xml
 	- make -C docs clean
 
+clean: clean-build clean-sandbox clean-src
 clean-all: clean-build clean-sandbox clean-src clean-docs
