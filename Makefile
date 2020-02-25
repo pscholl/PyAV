@@ -40,9 +40,6 @@ lint:
 	TESTSUITE=flake8 scripts/test
 	TESTSUITE=isort scripts/test
 
-doctest:
-	$(PYTHON) -m doctest tutorials/*.md
-
 test:
 	$(PYTHON) setup.py test
 
