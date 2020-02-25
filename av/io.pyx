@@ -143,7 +143,7 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
                 "out of sync, re-encode with ffmpeg -max_interleave_delta 0\n")
 
             # sys.stderr.write("%s \n" % (packet.time_base))
-            # sys.stderr.write("%s (%s) " % (pts, window))
+            # sys.stderr.write("%s (%s) \n" % (str(pts), type(window)))
             # for p in buf:
             #     sys.stderr.write("%s\n" % str(p))
             #     sys.stderr.write("%s: %s %s  " % (p.stream, p.pts * p.time_base, p.duration * p.time_base))
@@ -214,12 +214,13 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
         # XXX support bitmap subs and additional optional subtitle attr
         # XXX subtitles should be a subclass of tuples then
         #
+        asstxt = lambda s: ",".join(s.ass.split(',')[9:]).strip()
         content = lambda s:\
-            ",".join(s.ass.split(',')[9:]).strip() if s.type == b'ass' else\
-            s.text                                 if s.type == b'text' else\
+            asstxt(s) if s.type == b'ass' else\
+            s.text    if s.type == b'text' else\
             None
-        beg = lambda p:  p.pts * p.time_base - pts
-        end = lambda p: (p.pts + p.duration) * p.time_base - pts
+        beg = lambda p:  p.pts * p.time_base
+        end = lambda p: (p.pts + p.duration) * p.time_base
 
         frames = [ (int(beg(p)/TIMEBASE), int(end(p)/TIMEBASE), content(s))\
                    for p in packets for ss in p.decode() for s in ss]
@@ -229,9 +230,10 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
             # This is not very nice, but it removes all outdated subtitle frames
             # from the emission queue
             #
-            rest = [ (b-window, e-window, t) for (b,e,t) in rest\
-                     if e-window > 0 ]
-            frames[0:0] = [rest]
+            rest = [ (int(b-pts/TIMEBASE), int(e-pts/TIMEBASE), t)\
+                     for (b,e,t) in rest\
+                     if e-pts/TIMEBASE > 0 ]
+            frames[0:0] = rest
 
         return frames
 
@@ -245,12 +247,13 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
 
     #
     # we create a buffer for each stream, that is filled at each
-    # window step, with the decoded frames, 
+    # window step, with the decoded frames
     #
     out  = { s: None for s in selected }
     amax = { s: None               if isinf(window) else\
                 int(window*rate)   if rate is not None else\
-                int(window*s.rate) for s in out.keys() }
+                int(window*s.rate) if hasattr(s, 'rate') else\
+                None               for s in out.keys() }
 
     for pts, buf in perstep(container, selected):
         #
@@ -333,4 +336,5 @@ def annotate(frames, labels, rate=None):
 
 if __name__ == '__main__':
     for a,b in read("a:27 a:26", window=1000):
+        print(a,b)
 
