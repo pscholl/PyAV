@@ -179,7 +179,7 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
     #    check if sample rates are dividable by window
     #    if rate is not None
 
-    def aud(s, packets, rest=None):
+    def aud(packets, stream, rest=None):
         #
         # extract and concatenate all data frames for these audio streams,
         # make sure to flush the resampler with resample(None).
@@ -197,20 +197,21 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
         if rest is not None:
             frames[0:0] = [rest]
 
-        return avarray(concat(frames) if len(frames) else [], info=s)
+        return avarray(concat(frames) if len(frames) else [], info=stream)
 
-    def vid(s, packets):
+    def vid(packets, stream):
         #
         # stack all single images of a video streams
         #
         frames = [f.to_ndarray(format='rgb24').swapaxes(0,1)\
                   for p in packets for f in p.decode()]
-        return avarray(stack(frames) if len(frames) else [], info=s)
+        return avarray(stack(frames) if len(frames) else [], info=stream)
 
-    def sub(packets, pts, rest=None):
+    def sub(packets, rest=None):
         #
         # only works for ass/text subtitle at the moment, extract only
         # start and end time, and text.
+        #
         # XXX support bitmap subs and additional optional subtitle attr
         # XXX subtitles should be a subclass of tuples then
         #
@@ -224,18 +225,18 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
 
         frames = [ (int(beg(p)/TIMEBASE), int(end(p)/TIMEBASE), content(s))\
                    for p in packets for ss in p.decode() for s in ss]
-
-        if rest is not None:
-            #
-            # This is not very nice, but it removes all outdated subtitle frames
-            # from the emission queue
-            #
-            rest = [ (int(b-pts/TIMEBASE), int(e-pts/TIMEBASE), t)\
-                     for (b,e,t) in rest\
-                     if e-pts/TIMEBASE > 0 ]
-            frames[0:0] = rest
-
         return frames
+
+    def upsubs(subs, pts):
+        #
+        # remove all invalid subtitles, i.e. where the end is past pts, and
+        # adjust the beginning to the current pts.
+        #
+        def adjust(beg):
+            beg = beg * TIMEBASE - pts
+            return 0 if beg < 0 else beg / TIMEBASE
+
+        return [ (adjust(b),e,t) for (b,e,t) in subs if e*TIMEBASE > pts ]
 
 
     #
@@ -262,10 +263,10 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
         buf = sorted(buf, key=lambda p: p.stream.index)
 
         out.update( (s,\
-            aud(s,p, out[s])   if s.codec.type == 'audio' else\
-            sub(p,pts, out[s]) if s.codec.type == 'subtitle' else\
-            vid(s,p)           if s.codec.type == 'video' else\
-            None)  for (s,p) in groupby(buf, lambda p: p.stream) )
+            aud(p, s, out[s]) if s.codec.type == 'audio' else\
+            vid(p ,s)         if s.codec.type == 'video' else\
+            sub(p, out[s])    if s.codec.type == 'subtitle' else\
+            None)   for (s,p) in groupby(buf, lambda p: p.stream) )
 
         #
         # we need to yield in the same order as the stream selection input,
@@ -273,17 +274,18 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
         # audio and subtitle can contain data valid after pts+window.
         #
         yield [ out[s][:amax[s]] if s.codec.type == 'audio' else\
-                out[s]           for s in selected ]
+                out[s]     for s in selected ]
 
         #
         # now evict everything that was yielded, and became invalid in this
-        # step.
+        # step. Video is always returned frame-size, while audio might contain
+        # more samples.
         #
         out.update( (s,\
-            out[s][amax[s]:]   if s.codec.type == 'audio' else\
-            out[s]             if s.codec.type == 'subtitle' else\
-            None               if s.codec.type == 'video' else\
-            None)  for (s,p) in groupby(buf, lambda p: p.stream) )
+            out[s][amax[s]:]           if s.codec.type == 'audio' else\
+            upsubs(out[s], pts+window) if s.codec.type == 'subtitle' else\
+            None                       if s.codec.type == 'video' else\
+            None)                for s in out.keys() )
 
 
 def read(streams=lambda x: list(x), rate=None, file=None):
@@ -291,16 +293,16 @@ def read(streams=lambda x: list(x), rate=None, file=None):
 
 def annotate(frames, labels, rate=None):
     """ this is a helper function to convert from a time-centric view of
-    subtitle tuples, i.e. (beg, end, caption) where beg and end are timestamps in
-    milli-second and caption is a string, to a time-discrete view, i.e. an array
-    in which each entry designates a value for a clearly defined duration (one
-    period of the sampling rate).
+    subtitle tuples, i.e. (beg, end, caption) where beg and end are timestamps
+    in milli-second and caption is a string, to a time-discrete view, i.e. an
+    array in which each entry designates a value for a clearly defined duration
+    (one period of the sampling rate).
 
     Args:
      frames: an array, of which the first dimension will be taken to generate an
              array of labels of the same length.
 
-     labels: a list of tuples (beg, end, label) that will be convrted to a
+     labels: a list of tuples (beg, end, label) that will be converted to a
              discrete-time view, beg and end are timestamp in milli-seconds,
              relative to the first sample in the frames array.
 
