@@ -242,7 +242,7 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
     #
     # here we actually start reading data from the container
     #
-    container = open(file or argv[1])
+    container = open(file or argv[1] if 1 < len(argv) else 'pipe:0')
     selected  = mapstreams(streams, container.streams)
     container = container.demux(list(selected))
 
