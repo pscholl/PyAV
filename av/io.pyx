@@ -227,7 +227,7 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
                    for p in packets for ss in p.decode() for s in ss]
         return frames
 
-    def upsubs(subs, pts):
+    def rmsubs(subs, pts):
         #
         # remove all invalid subtitles, i.e. where the end is past pts, and
         # adjust the beginning to the current pts.
@@ -237,7 +237,6 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
             return 0 if beg < 0 else beg / TIMEBASE
 
         return [ (adjust(b),e,t) for (b,e,t) in subs if e*TIMEBASE > pts ]
-
 
     #
     # here we actually start reading data from the container
@@ -250,7 +249,9 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
     # we create a buffer for each stream, that is filled at each
     # window step, with the decoded frames
     #
-    out  = { s: None for s in selected }
+    out  = { s: []   if s.codec.type == 'subtitle' else\
+                None for s in selected }
+
     amax = { s: None               if isinf(window) else\
                 int(window*rate)   if rate is not None else\
                 int(window*s.rate) if hasattr(s, 'rate') else\
@@ -283,7 +284,7 @@ def input(streams=lambda x: list(x), window=1000, rate=None, file=None):
         #
         out.update( (s,\
             out[s][amax[s]:]           if s.codec.type == 'audio' else\
-            upsubs(out[s], pts+window) if s.codec.type == 'subtitle' else\
+            rmsubs(out[s], pts+window) if s.codec.type == 'subtitle' else\
             None                       if s.codec.type == 'video' else\
             None)                for s in out.keys() )
 
